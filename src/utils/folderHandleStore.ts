@@ -1,0 +1,102 @@
+const DB_NAME = 'yritmx_handles_db';
+const STORE_NAME = 'directory_handles';
+
+function openDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function saveDirectoryHandle(id: string, handle: FileSystemDirectoryHandle): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      tx.objectStore(STORE_NAME).put(handle, id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // IndexedDB may be restricted in private windows; ignore gracefully
+  }
+}
+
+export async function getDirectoryHandle(id: string): Promise<FileSystemDirectoryHandle | null> {
+  try {
+    const db = await openDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const req = tx.objectStore(STORE_NAME).get(id);
+      req.onsuccess = () => resolve((req.result as FileSystemDirectoryHandle) || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteDirectoryHandle(id: string): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      tx.objectStore(STORE_NAME).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // ignore
+  }
+}
+
+export async function readAudioFilesFromDirectoryHandle(
+  dirHandle: FileSystemDirectoryHandle
+): Promise<File[]> {
+  const handleWithPerm = dirHandle as FileSystemDirectoryHandle & {
+    queryPermission?: (opts: { mode: 'read' }) => Promise<PermissionState>;
+    requestPermission?: (opts: { mode: 'read' }) => Promise<PermissionState>;
+  };
+
+  if (handleWithPerm.queryPermission && handleWithPerm.requestPermission) {
+    let state = await handleWithPerm.queryPermission({ mode: 'read' });
+    if (state !== 'granted') {
+      state = await handleWithPerm.requestPermission({ mode: 'read' });
+    }
+    if (state !== 'granted') {
+      throw new Error('Доступ к папке не предоставлен');
+    }
+  }
+
+  const audioFiles: File[] = [];
+  const collect = async (dir: FileSystemDirectoryHandle, depth = 0) => {
+    if (depth > 3) return;
+    const iterable = dir as unknown as {
+      values: () => AsyncIterable<FileSystemHandle>;
+    };
+    for await (const entry of iterable.values()) {
+      if (entry.kind === 'file') {
+        const fileHandle = entry as FileSystemFileHandle;
+        const file = await fileHandle.getFile();
+        if (
+          file.type.startsWith('audio/') ||
+          /\.(mp3|flac|wav|ogg|m4a|aac)$/i.test(file.name)
+        ) {
+          audioFiles.push(file);
+        }
+      } else if (entry.kind === 'directory') {
+        await collect(entry as FileSystemDirectoryHandle, depth + 1);
+      }
+    }
+  };
+
+  await collect(dirHandle);
+  return audioFiles;
+}
