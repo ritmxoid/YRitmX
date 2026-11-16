@@ -12,7 +12,6 @@ import {
   Minimize2,
   Pause,
   Play,
-  Radio,
   RefreshCw,
   Repeat,
   Shuffle,
@@ -1112,15 +1111,60 @@ export default function App() {
           uiVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-900/40 shrink-0">
-            <Radio className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+        <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#090D0B] border border-lime-400/20 flex items-center justify-center shadow-lg shadow-lime-950/30 shrink-0 overflow-hidden">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 64 64"
+              fill="none"
+              aria-hidden="true"
+              className="w-full h-full"
+            >
+              <rect width="64" height="64" rx="16" fill="#090D0B" />
+              <rect x="13" y="22" width="7" height="22" rx="3.5" fill="#A3E635" />
+              <rect x="24" y="13" width="7" height="38" rx="3.5" fill="#84CC16" />
+              <rect x="35" y="19" width="7" height="26" rx="3.5" fill="#BEF264" />
+              <rect x="46" y="27" width="7" height="16" rx="3.5" fill="#4D7C0F" />
+              <circle cx="49.5" cy="18.5" r="3.5" fill="#A3E635" />
+            </svg>
           </div>
-          <div className="min-w-0">
-            <h1 className="font-bold text-base sm:text-lg tracking-wider bg-gradient-to-r from-white via-gray-200 to-purple-300 bg-clip-text text-transparent whitespace-nowrap">
-              YRitmX
+          <div className="min-w-0 flex flex-col justify-center">
+            <h1 className="flex items-center">
+              <span className="sr-only">YRitmX</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="16 8 342 84"
+                aria-hidden="true"
+                className="h-6 sm:h-7 w-auto block"
+              >
+                <path
+                  fill="#68e524"
+                  d="M21 26h10.5L43 55.5L54.5 26H65L41.5 88H31l7-18.5L21 26z"
+                />
+                <path
+                  fill="#ffffff"
+                  d="M78 26h9.5v8.5C90.5 28.5 95.5 25 102.5 25c8.5 0 13.5 5.5 13.5 15v7h-9.5v-6c0-4.5-2.5-7-6.5-7-4.5 0-8 3-8 8.5V76H78V26z"
+                />
+                <circle fill="#ffffff" cx="148" cy="11" r="6" />
+                <path
+                  fill="#ffffff"
+                  d="M132 26h21v41h13v9h-36v-9h13V35h-11v-9z"
+                />
+                <path
+                  fill="#ffffff"
+                  d="M191 14h10v12h14v9h-14v41h-10V35h-12v-9h12V14z"
+                />
+                <path
+                  fill="#ffffff"
+                  d="M230 26h9v6.5c2.5-4.5 6.5-7.5 12-7.5 5.5 0 9.5 2.5 11.5 7.5 3-5 7.5-7.5 13-7.5 8 0 12.5 5.5 12.5 15v36h-9V41.5c0-5-2-7.5-6-7.5-4 0-6.5 3-6.5 8V76h-9V41.5c0-5-2-7.5-6-7.5-4 0-6.5 3-6.5 8V76h-9V26z"
+                />
+                <path
+                  fill="#b2ed11"
+                  d="M300 26h11.5l11.5 17.5L334.5 26H346l-17 24.5L355 88h-11.5l-20.5-30.5L310.5 76H299l18-25.5L300 26z"
+                />
+              </svg>
             </h1>
-            <p className="text-[11px] sm:text-xs text-gray-400 font-medium whitespace-nowrap [@media(max-height:540px)_and_(orientation:landscape)]:hidden sm:block">
+            <p className="text-[11px] sm:text-xs text-gray-400 font-medium whitespace-nowrap [@media(max-height:540px)_and_(orientation:landscape)]:hidden sm:block mt-0.5">
               {t.appSubtitle}
             </p>
           </div>
