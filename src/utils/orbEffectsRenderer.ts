@@ -111,15 +111,10 @@ export function pickTrackOrbStyle(): { fxMode: OrbFxMode; shape: OrbShape } {
   }
   lastPickedFxIndex = fxIdx;
 
-  // Give circle a pleasant ~25% weight and stars/polygons/hearts ~75% variety
-  let shapeIdx: number;
-  if (Math.random() < 0.25 && lastPickedShapeIndex !== 0) {
-    shapeIdx = 0;
-  } else {
-    shapeIdx = 1 + Math.floor(Math.random() * (ORB_SHAPES.length - 1));
-    if (shapeIdx === lastPickedShapeIndex) {
-      shapeIdx = 1 + ((shapeIdx % (ORB_SHAPES.length - 1)));
-    }
+  // Pick one distinct non-circle figure (star, polygon, diamond, or heart) per track
+  let shapeIdx = 1 + Math.floor(Math.random() * (ORB_SHAPES.length - 1));
+  if (shapeIdx === lastPickedShapeIndex) {
+    shapeIdx = 1 + (shapeIdx % (ORB_SHAPES.length - 1));
   }
   lastPickedShapeIndex = shapeIdx;
 
@@ -131,27 +126,10 @@ export function pickTrackOrbStyle(): { fxMode: OrbFxMode; shape: OrbShape } {
 
 export function pickCompanionOrbStyle(
   trackFx: OrbFxMode,
-  trackShape: OrbShape,
-  companionIdx: number
+  _trackShape: OrbShape,
+  _companionIdx: number
 ): { fxMode: OrbFxMode; shape: OrbShape } {
-  // Companions either share the track's signature effect or pick a complementary one
-  const shareFx = Math.random() < 0.45;
-  const fxMode = shareFx
-    ? trackFx
-    : ORB_FX_MODES[
-        (ORB_FX_MODES.indexOf(trackFx) + 1 + companionIdx + Math.floor(Math.random() * 4)) %
-          ORB_FX_MODES.length
-      ];
-
-  const shareShape = Math.random() < 0.4;
-  const shape = shareShape
-    ? trackShape
-    : ORB_SHAPES[
-        (ORB_SHAPES.indexOf(trackShape) + 1 + companionIdx + Math.floor(Math.random() * 3)) %
-          ORB_SHAPES.length
-      ];
-
-  return { fxMode, shape };
+  return { fxMode: trackFx, shape: 'circle' };
 }
 
 export function hslToCss(h: number, s: number, l: number, a = 1): string {

@@ -1,6 +1,7 @@
 import { RotateCcw, Sliders, X } from 'lucide-react';
 import { EQ_BANDS, EQ_PRESETS } from '../constants/visualizer';
 import { useI18n } from '../i18n/I18nContext';
+import { trackEvent } from '../utils/analytics';
 
 interface EqualizerModalProps {
   isOpen: boolean;
@@ -43,7 +44,10 @@ export function EqualizerModal({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => onApplyPreset([0, 0, 0, 0, 0])}
+              onClick={() => {
+                onApplyPreset([0, 0, 0, 0, 0]);
+                trackEvent('eq_preset_select', { preset_id: 'reset' });
+              }}
               className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium text-gray-300 transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -70,7 +74,10 @@ export function EqualizerModal({
               <button
                 key={preset.id}
                 type="button"
-                onClick={() => onApplyPreset([...preset.gains])}
+                onClick={() => {
+                  onApplyPreset([...preset.gains]);
+                  trackEvent('eq_preset_select', { preset_id: preset.id });
+                }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition whitespace-nowrap cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 ${
                   isActive
                     ? 'bg-purple-600 text-white'

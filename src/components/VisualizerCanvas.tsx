@@ -195,7 +195,9 @@ export function VisualizerCanvas({
       const seed = dna.seed;
 
       const now = performance.now() * 0.001;
-      const stepSpeed = prefersReducedMotion ? 0.002 : playing ? 0.018 * dyn : 0.007 * dyn;
+      const stepSpeed = playing
+        ? (prefersReducedMotion ? 0.01 : 0.018) * dyn
+        : (prefersReducedMotion ? 0.0045 : 0.007) * dyn;
       phase += stepSpeed * dir;
 
       const isDesktop = width >= 1024;
@@ -208,14 +210,14 @@ export function VisualizerCanvas({
         activeAnalyser.getByteFrequencyData(freqData);
         activeAnalyser.getByteTimeDomainData(timeData);
       } else {
-        const amp = prefersReducedMotion ? 16 : 38;
+        const amp = prefersReducedMotion ? 26 : 38;
         for (let i = 0; i < freqData.length; i++) {
           freqData[i] = Math.max(
             10,
             Math.floor(Math.sin(now * 1.5 * dyn + i * 0.14 + seed) * amp + amp + 14)
           );
           timeData[i] = Math.floor(
-            128 + Math.sin(now * 2.1 * dyn + i * 0.12) * (prefersReducedMotion ? 6 : 20)
+            128 + Math.sin(now * 2.1 * dyn + i * 0.12) * (prefersReducedMotion ? 12 : 20)
           );
         }
       }

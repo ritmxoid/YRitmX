@@ -54,6 +54,7 @@ import {
   VisualDNA,
 } from './types/audio';
 import { useI18n } from './i18n/I18nContext';
+import { trackEvent } from './utils/analytics';
 import { DEFAULT_AUDIUS_HANDLE, fetchAudiusProfileTracks } from './utils/audiusApi';
 import { createDemoTracks } from './utils/demoAudioGenerator';
 import { deleteDirectoryHandle } from './utils/folderHandleStore';
@@ -344,6 +345,7 @@ export default function App() {
         const next = Math.floor(Math.random() * PALETTES.length);
         return next === prev ? (prev + 1) % PALETTES.length : next;
       });
+      trackEvent('visualizer_randomize', { mix_enabled: useMix });
     },
     [mixEnabled]
   );
@@ -356,6 +358,7 @@ export default function App() {
         mixLayers: next ? pickRandomMixLayers(vizMode, Math.random() > 0.35 ? 2 : 1) : [],
       }));
       showToast(next ? t.mixEnabledToast : t.mixDisabledToast, 'info');
+      trackEvent('visualizer_mix_toggle', { enabled: next });
       return next;
     });
   }, [showToast, t.mixDisabledToast, t.mixEnabledToast, vizMode]);
@@ -369,6 +372,7 @@ export default function App() {
         // ignore storage errors
       }
       showToast(next ? t.captionEnabledToast : t.captionDisabledToast, 'info');
+      trackEvent('orb_captions_toggle', { enabled: next });
       return next;
     });
   }, [showToast, t.captionDisabledToast, t.captionEnabledToast]);
@@ -500,6 +504,11 @@ export default function App() {
         }
 
         saveProfileToHistory(resolvedHandle);
+        trackEvent('source_audius_load', {
+          handle: resolvedHandle,
+          track_count: tracks.length,
+          is_initial: Boolean(options?.isInitial),
+        });
         if (options?.closeModal) setIsSourcesOpen(false);
 
         if (options?.autoPlay) {
@@ -591,6 +600,7 @@ export default function App() {
         setIsPlaying(true);
         setAwaitingAutoplayUnlock(false);
       }
+      trackEvent('source_demo_start', { track_count: demoTracks.length });
       showToast(t.demoStartedToast, 'success');
     } catch {
       showToast(t.demoFailedToast, 'error');
@@ -676,6 +686,10 @@ export default function App() {
           audioRef.current.src = parsedTracks[0].src;
           await startPlaybackSafe(true);
         }
+        trackEvent('source_folder_load', {
+          folder_name: folderName,
+          track_count: parsedTracks.length,
+        });
         showToast(t.folderLoadedToast(folderName, parsedTracks.length), 'success');
       } finally {
         setIsParsingFiles(false);
@@ -752,6 +766,10 @@ export default function App() {
           audioRef.current.src = tracks[0].src;
           await startPlaybackSafe(true);
         }
+        trackEvent('source_url_load', {
+          label,
+          track_count: tracks.length,
+        });
         showToast(t.urlLoadedToast(tracks.length), 'success');
       } catch (err) {
         const msg = err instanceof Error ? err.message : t.urlErrorFallback;
@@ -765,6 +783,7 @@ export default function App() {
 
   const handleConfirmDelete = useCallback(
     (target: ConfirmDeleteTarget) => {
+      trackEvent('source_delete', { source_type: target.type });
       if (target.type === 'audius') {
         setSavedProfiles((prev) => {
           const next = prev.filter((p) => p !== target.id);
@@ -814,6 +833,11 @@ export default function App() {
       setCurrentIndex(index);
       setCurrentTime(0);
       setDuration(track.durationHint ?? 0);
+      trackEvent('track_select', {
+        track_title: track.title,
+        artist: track.artist,
+        index,
+      });
 
       if (autoVisualPerTrack) {
         randomizeVisual();
@@ -847,12 +871,21 @@ export default function App() {
     if (isPlaying) {
       audioEl.pause();
       setIsPlaying(false);
+      trackEvent('audio_pause', {
+        track_title: currentTrack?.title,
+        artist: currentTrack?.artist,
+      });
     } else {
       if (!audioEl.src && currentTrack) {
         audioEl.src = currentTrack.src;
       }
       const started = await startPlaybackSafe(true);
-      if (!started) {
+      if (started) {
+        trackEvent('audio_play', {
+          track_title: currentTrack?.title,
+          artist: currentTrack?.artist,
+        });
+      } else {
         showToast(t.streamFailedToast, 'error');
       }
     }
@@ -861,6 +894,7 @@ export default function App() {
   const nextTrack = useCallback(
     (forceAutoPlay?: boolean) => {
       if (playlist.length === 0) return;
+      trackEvent('track_next', { shuffle: isShuffle });
       const nextIdx = isShuffle
         ? Math.floor(Math.random() * playlist.length)
         : (currentIndex + 1) % playlist.length;
@@ -871,6 +905,7 @@ export default function App() {
 
   const prevTrack = useCallback(() => {
     if (playlist.length === 0) return;
+    trackEvent('track_prev');
     const prevIdx = (currentIndex - 1 + playlist.length) % playlist.length;
     void selectTrack(prevIdx, isPlaying);
   }, [currentIndex, isPlaying, playlist.length, selectTrack]);
@@ -901,6 +936,7 @@ export default function App() {
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     audioEl.currentTime = ratio * audioEl.duration;
     setCurrentTime(audioEl.currentTime);
+    trackEvent('audio_seek', { progress_pct: Math.round(ratio * 100) });
   };
 
   // Auto-enter Floating Track Orbs mode after 10 seconds of inactivity while playing
@@ -923,6 +959,7 @@ export default function App() {
       window.clearTimeout(timeoutId);
       timeoutId = window.setTimeout(() => {
         setUiVisible(false);
+        trackEvent('zen_mode_toggle', { zen_enabled: true, trigger: 'auto' });
       }, 10000);
     };
 
@@ -968,6 +1005,7 @@ export default function App() {
   const openSources = (tab: SourceTab) => {
     setSourcesTab(tab);
     setIsSourcesOpen(true);
+    trackEvent('modal_open', { modal: 'sources', tab });
   };
 
   const handleInstallApp = useCallback(async () => {
@@ -976,6 +1014,7 @@ export default function App() {
       return;
     }
     const outcome = await promptInstall();
+    trackEvent('pwa_install_attempt', { outcome });
     if (outcome === 'accepted') {
       showToast(t.installedSuccessToast, 'success');
     } else if (outcome === 'manual') {
@@ -985,6 +1024,7 @@ export default function App() {
 
   const handleToggleFullscreen = useCallback(async () => {
     const outcome = await toggleFullscreen();
+    trackEvent('fullscreen_toggle', { outcome });
     if (outcome === 'ios-guide') {
       setIsInstallGuideOpen(true);
     } else if (outcome === 'unsupported') {
@@ -1010,7 +1050,11 @@ export default function App() {
     ) {
       return;
     }
-    setUiVisible((v) => !v);
+    setUiVisible((v) => {
+      const nextVisible = !v;
+      trackEvent('zen_mode_toggle', { zen_enabled: !nextVisible, trigger: 'stage_click' });
+      return nextVisible;
+    });
   };
 
   return (
@@ -1129,7 +1173,10 @@ export default function App() {
 
             <button
               type="button"
-              onClick={() => setIsEqOpen(true)}
+              onClick={() => {
+                setIsEqOpen(true);
+                trackEvent('modal_open', { modal: 'equalizer' });
+              }}
               aria-label={t.eqLabel}
               title={t.eqLabel}
               className="p-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition cursor-pointer"
@@ -1152,7 +1199,13 @@ export default function App() {
 
             <button
               type="button"
-              onClick={() => setUiVisible((v) => !v)}
+              onClick={() =>
+                setUiVisible((v) => {
+                  const next = !v;
+                  trackEvent('zen_mode_toggle', { zen_enabled: !next, trigger: 'button' });
+                  return next;
+                })
+              }
               aria-label={t.zenLabel}
               title={t.zenTitle}
               className="p-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition cursor-pointer"
@@ -1183,7 +1236,10 @@ export default function App() {
 
           <button
             type="button"
-            onClick={() => setIsMobileMenuOpen(true)}
+            onClick={() => {
+              setIsMobileMenuOpen(true);
+              trackEvent('modal_open', { modal: 'menu' });
+            }}
             aria-label={t.openMenuLabel}
             title={t.menuTitle}
             className="p-2.5 rounded-xl glass text-gray-200 hover:text-white hover:bg-white/10 transition cursor-pointer"
@@ -1270,7 +1326,14 @@ export default function App() {
               <select
                 id="desktop-viz-select"
                 value={vizMode}
-                onChange={(e) => setVizMode(parseInt(e.target.value, 10))}
+                onChange={(e) => {
+                  const id = parseInt(e.target.value, 10);
+                  setVizMode(id);
+                  trackEvent('visualizer_mode_change', {
+                    mode_id: id,
+                    mode_label: VIZ_MODES[id]?.label,
+                  });
+                }}
                 className="bg-transparent text-xs text-purple-300 font-semibold focus:outline-none cursor-pointer max-w-[190px]"
               >
                 {VIZ_MODES.map((m) => (
@@ -1291,7 +1354,14 @@ export default function App() {
               <select
                 id="desktop-palette-select"
                 value={paletteIndex}
-                onChange={(e) => setPaletteIndex(parseInt(e.target.value, 10))}
+                onChange={(e) => {
+                  const id = parseInt(e.target.value, 10);
+                  setPaletteIndex(id);
+                  trackEvent('visualizer_palette_change', {
+                    palette_id: id,
+                    palette_name: PALETTES[id]?.name,
+                  });
+                }}
                 className="bg-transparent text-xs text-purple-300 font-semibold focus:outline-none cursor-pointer"
               >
                 {PALETTES.map((p) => (
@@ -1332,6 +1402,7 @@ export default function App() {
                 const next = !autoVisualPerTrack;
                 setAutoVisualPerTrack(next);
                 showToast(next ? t.autoBgOnToast : t.autoBgOffToast, 'info');
+                trackEvent('visualizer_auto_toggle', { enabled: next });
               }}
               title={t.autoBgTitle}
               className={`px-3 py-2 rounded-xl text-xs font-medium transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer border ${
@@ -1435,7 +1506,10 @@ export default function App() {
             <div className="flex lg:hidden items-center gap-2">
               <button
                 type="button"
-                onClick={() => setIsEqOpen(true)}
+                onClick={() => {
+                  setIsEqOpen(true);
+                  trackEvent('modal_open', { modal: 'equalizer' });
+                }}
                 aria-label={t.eqLabel}
                 className="p-2.5 rounded-xl bg-white/5 text-purple-300 cursor-pointer"
               >
@@ -1443,7 +1517,10 @@ export default function App() {
               </button>
               <button
                 type="button"
-                onClick={() => setIsMobilePlaylistOpen(true)}
+                onClick={() => {
+                  setIsMobilePlaylistOpen(true);
+                  trackEvent('modal_open', { modal: 'playlist' });
+                }}
                 aria-label={t.openPlaylistLabel}
                 className="px-2.5 py-2 rounded-xl bg-white/5 text-purple-300 flex md:hidden landscape:hidden items-center gap-1.5 cursor-pointer"
               >
@@ -1459,6 +1536,7 @@ export default function App() {
                   const next = !isShuffle;
                   setIsShuffle(next);
                   showToast(next ? t.shuffleOnToast : t.shuffleOffToast, 'info');
+                  trackEvent('toggle_shuffle', { enabled: next });
                 }}
                 aria-label={t.shuffleLabel}
                 title={t.shuffleLabel}
@@ -1506,6 +1584,7 @@ export default function App() {
                   const next = !isRepeat;
                   setIsRepeat(next);
                   showToast(next ? t.repeatOnToast : t.repeatOffToast, 'info');
+                  trackEvent('toggle_repeat', { enabled: next });
                 }}
                 aria-label={t.repeatLabel}
                 title={t.repeatLabel}
@@ -1520,7 +1599,13 @@ export default function App() {
             <div className="hidden lg:flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => setIsMuted((m) => !m)}
+                onClick={() =>
+                  setIsMuted((m) => {
+                    const next = !m;
+                    trackEvent('toggle_mute', { muted: next });
+                    return next;
+                  })
+                }
                 aria-label={isMuted ? t.unmuteLabel : t.muteLabel}
                 className="p-1.5 text-gray-400 hover:text-white transition cursor-pointer"
               >
@@ -1567,6 +1652,10 @@ export default function App() {
           }
         }}
         onEnded={() => {
+          trackEvent('track_complete', {
+            track_title: currentTrack?.title,
+            repeat: isRepeat,
+          });
           if (isRepeat && audioRef.current) {
             audioRef.current.currentTime = 0;
             void audioRef.current.play();
@@ -1577,6 +1666,7 @@ export default function App() {
         onError={() => {
           if (playlist.length === 0) return;
           setIsPlaying(false);
+          trackEvent('stream_error', { track_title: currentTrack?.title });
           showToast(t.streamErrorToast, 'error');
         }}
       />
@@ -1628,15 +1718,39 @@ export default function App() {
         showOrbCaptions={showOrbCaptions}
         isAppInstalled={isInstalled}
         isFullscreen={isNativeFullscreen}
-        onChangeVizMode={setVizMode}
-        onChangePalette={setPaletteIndex}
-        onToggleAutoVisual={() => setAutoVisualPerTrack((v) => !v)}
+        onChangeVizMode={(id) => {
+          setVizMode(id);
+          trackEvent('visualizer_mode_change', {
+            mode_id: id,
+            mode_label: VIZ_MODES[id]?.label,
+          });
+        }}
+        onChangePalette={(id) => {
+          setPaletteIndex(id);
+          trackEvent('visualizer_palette_change', {
+            palette_id: id,
+            palette_name: PALETTES[id]?.name,
+          });
+        }}
+        onToggleAutoVisual={() =>
+          setAutoVisualPerTrack((v) => {
+            const next = !v;
+            trackEvent('visualizer_auto_toggle', { enabled: next });
+            return next;
+          })
+        }
         onToggleMix={toggleMixEnabled}
         onToggleOrbCaptions={toggleOrbCaptions}
         onRandomizeVisual={() => randomizeVisual()}
         onOpenSources={(tab) => openSources(tab)}
-        onOpenEqualizer={() => setIsEqOpen(true)}
-        onToggleUI={() => setUiVisible(false)}
+        onOpenEqualizer={() => {
+          setIsEqOpen(true);
+          trackEvent('modal_open', { modal: 'equalizer' });
+        }}
+        onToggleUI={() => {
+          setUiVisible(false);
+          trackEvent('zen_mode_toggle', { zen_enabled: true, trigger: 'menu' });
+        }}
         onToggleFullscreen={() => void handleToggleFullscreen()}
         onInstallApp={() => void handleInstallApp()}
       />

@@ -25,10 +25,21 @@ function isRunningStandalone(): boolean {
   );
 }
 
+function isMobileOrTouchDevice(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const uaMobile =
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet/i.test(
+      navigator.userAgent
+    );
+  const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+  return uaMobile || (coarsePointer && navigator.maxTouchPoints > 0);
+}
+
 export function useFullscreen() {
   const [isFullscreen, setIsFullscreen] = useState<boolean>(() => Boolean(getFullscreenElement()));
   const [isStandaloneDisplay, setIsStandaloneDisplay] = useState<boolean>(() => isRunningStandalone());
   const userDismissedRef = useRef(false);
+  const isMobileRef = useRef<boolean>(isMobileOrTouchDevice());
 
   const canFullscreen =
     typeof document !== 'undefined' &&
@@ -135,11 +146,11 @@ export function useFullscreen() {
     };
   }, []);
 
-  // Try fullscreen immediately when opened in browser, and on first user gesture if blocked by browser policy
+  // Auto-fullscreen only on mobile/touch devices; desktop stays windowed unless user clicks Fullscreen
   useEffect(() => {
-    if (isStandaloneDisplay || isIOS) return;
+    if (!isMobileRef.current || isStandaloneDisplay || isIOS) return;
 
-    // Best-effort attempt on mount (succeeds in permissive WebViews/kiosk browsers)
+    // Best-effort attempt on mount (succeeds in permissive mobile WebViews/kiosk browsers)
     void enterFullscreen();
 
     const handleFirstGesture = (e: Event) => {

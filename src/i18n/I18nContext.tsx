@@ -1,4 +1,5 @@
 import { createContext, ReactNode, useContext, useEffect, useMemo } from 'react';
+import { trackEvent } from '../utils/analytics';
 import {
   detectBrowserLanguage,
   getTranslations,
@@ -26,6 +27,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.lang = value.lang;
     document.documentElement.dir = value.lang === 'ar' ? 'rtl' : 'ltr';
+    trackEvent('app_language', { lang: value.lang });
   }, [value.lang]);
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;

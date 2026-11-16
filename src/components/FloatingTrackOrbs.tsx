@@ -3,6 +3,7 @@ import { useEffect, useId, useMemo, useRef } from 'react';
 import { DEFAULT_COVER_IMAGE } from '../constants/visualizer';
 import { useI18n } from '../i18n/I18nContext';
 import { Track } from '../types/audio';
+import { trackEvent } from '../utils/analytics';
 import {
   createOrbFxState,
   getShapeClipPath,
@@ -170,6 +171,9 @@ export function FloatingTrackOrbs({
     const activeSize = isMobile ? 96 : 116;
 
     const trackStyle = pickTrackOrbStyle();
+    const totalOrbs = 1 + selectedCompanions.length;
+    const shapedSlot = Math.floor(Math.random() * totalOrbs);
+    const activeShape: OrbShape = shapedSlot === 0 ? trackStyle.shape : 'circle';
 
     return [
       {
@@ -179,12 +183,14 @@ export function FloatingTrackOrbs({
         size: activeSize,
         effect: EFFECTS[Math.floor(Math.random() * EFFECTS.length)],
         fxMode: trackStyle.fxMode,
-        shape: trackStyle.shape,
-        clipPath: getShapeClipPath(trackStyle.shape),
+        shape: activeShape,
+        clipPath: getShapeClipPath(activeShape),
         glowRgb: GLOW_COLORS[Math.floor(Math.random() * GLOW_COLORS.length)],
       },
       ...selectedCompanions.map((item, idx) => {
-        const compStyle = pickCompanionOrbStyle(trackStyle.fxMode, trackStyle.shape, idx);
+        const compShape: OrbShape = shapedSlot === idx + 1 ? trackStyle.shape : 'circle';
+        const compStyle = pickCompanionOrbStyle(trackStyle.fxMode, compShape, idx);
+        const finalShape: OrbShape = compShape;
         return {
           track: item.track,
           indexInPlaylist: item.indexInPlaylist,
@@ -192,8 +198,8 @@ export function FloatingTrackOrbs({
           size: (isMobile ? 64 : 76) + (idx % 3) * 10,
           effect: EFFECTS[(idx + Math.floor(Math.random() * EFFECTS.length)) % EFFECTS.length],
           fxMode: compStyle.fxMode,
-          shape: compStyle.shape,
-          clipPath: getShapeClipPath(compStyle.shape),
+          shape: finalShape,
+          clipPath: getShapeClipPath(finalShape),
           glowRgb:
             GLOW_COLORS[(idx + Math.floor(Math.random() * GLOW_COLORS.length)) % GLOW_COLORS.length],
         };
@@ -213,8 +219,8 @@ export function FloatingTrackOrbs({
     const pad = 20;
 
     const resizeFxCanvas = () => {
-      width = window.innerWidth;
-      height = window.innerHeight;
+      width = Math.max(1, window.innerWidth);
+      height = Math.max(1, window.innerHeight);
       if (!fxCanvas || !fxCtx) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
       fxCanvas.width = Math.floor(width * dpr);
@@ -226,8 +232,6 @@ export function FloatingTrackOrbs({
     resizeFxCanvas();
     window.addEventListener('resize', resizeFxCanvas);
 
-    // 1.5x gentler base velocities while preserving dynamic intensity curve
-    const speedFactor = 1 / 1.5;
     const fxFactor = 1 / 1.5;
 
     const physics: OrbPhysics[] = orbSpecs.map((spec, idx) => {
@@ -235,7 +239,7 @@ export function FloatingTrackOrbs({
       const startDist = spec.isActive
         ? 0
         : Math.min(width, height) * (0.22 + Math.random() * 0.16);
-      const speed = (spec.isActive ? 0.28 : 0.34) * speedFactor;
+      const speed = spec.isActive ? 0.85 : 1.05;
       const moveAngle = Math.random() * Math.PI * 2;
       return {
         indexInPlaylist: spec.indexInPlaylist,
@@ -308,7 +312,7 @@ export function FloatingTrackOrbs({
     let smoothBass = 0.08;
     let smoothHigh = 0.07;
     let prevBass = 0.08;
-    let smoothTempo = 0.14 * speedFactor;
+    let smoothTempo = 0.275;
     let songHue = Math.random() * 360;
     let animId = 0;
     let frameCounter = 0;
@@ -316,6 +320,10 @@ export function FloatingTrackOrbs({
     const tick = () => {
       animId = requestAnimationFrame(tick);
       frameCounter += 1;
+
+      if (window.innerWidth !== width || window.innerHeight !== height) {
+        resizeFxCanvas();
+      }
 
       const {
         analyser: activeAnalyser,
@@ -355,17 +363,15 @@ export function FloatingTrackOrbs({
       const energyNorm = Math.max(0, Math.min(1, (smoothEnergy - 0.11) / 0.48));
       const intenseBoost = Math.pow(energyNorm, 1.7);
 
-      // Flight speed 1.5x slower while retaining identical music-intensity response curve
+      // Smooth, 2x gentler flight speed across the entire spectrum
       const targetTempo =
-        (prefersReducedMotion
-          ? 0.08
-          : playing
-          ? 0.13 +
-            Math.pow(smoothEnergy, 1.4) * 0.95 +
-            intenseBoost * 1.95 +
-            beatKick * (0.22 + intenseBoost * 1.15)
-          : 0.14) * speedFactor;
-      smoothTempo += (targetTempo - smoothTempo) * (0.05 + intenseBoost * 0.06);
+        (playing
+          ? 0.72 +
+            Math.pow(smoothEnergy, 1.35) * 1.25 +
+            intenseBoost * 1.75 +
+            beatKick * (0.28 + intenseBoost * 0.95)
+          : 0.48) * 0.5;
+      smoothTempo += (targetTempo - smoothTempo) * (0.06 + intenseBoost * 0.06);
 
       const effectIntensity = playing ? 0.24 + smoothEnergy * 0.9 + intenseBoost * 0.45 : 0.22;
 
@@ -379,16 +385,17 @@ export function FloatingTrackOrbs({
 
       for (let i = 0; i < physics.length; i++) {
         const p = physics[i];
-        p.phase += prefersReducedMotion
-          ? 0.005
-          : 0.009 + smoothEnergy * 0.02 + intenseBoost * 0.018;
+        p.phase +=
+          (prefersReducedMotion ? 0.008 : 0.011) +
+          smoothEnergy * 0.022 +
+          intenseBoost * 0.02;
 
-        const wander = (0.0025 + smoothEnergy * 0.005 + intenseBoost * 0.014) * speedFactor;
+        const wander = (0.01 + smoothEnergy * 0.018 + intenseBoost * 0.036) * 0.5;
         p.vx += Math.sin(p.phase * 0.78 + i * 2.1) * wander;
         p.vy += Math.cos(p.phase * 0.92 + i * 1.7) * wander;
 
-        const edgeMargin = 22 * (1 - intenseBoost * 0.65);
-        const edgeSteerStrength = 0.012 * (1 - intenseBoost * 0.75) * speedFactor;
+        const edgeMargin = 24 * (1 - intenseBoost * 0.65);
+        const edgeSteerStrength = 0.042 * (1 - intenseBoost * 0.72);
         if (edgeMargin > 2) {
           if (p.x < pad + edgeMargin) {
             const factor = (pad + edgeMargin - p.x) / edgeMargin;
@@ -407,9 +414,9 @@ export function FloatingTrackOrbs({
         }
 
         const targetMag =
-          ((p.isActive ? 0.29 : 0.36) + intenseBoost * (p.isActive ? 0.28 : 0.34)) * speedFactor;
+          (p.isActive ? 0.85 : 1.05) + intenseBoost * (p.isActive ? 0.35 : 0.45);
         const mag = Math.hypot(p.vx, p.vy) || 0.01;
-        const adjustedMag = mag + (targetMag - mag) * 0.038;
+        const adjustedMag = mag + (targetMag - mag) * 0.05;
         p.vx = (p.vx / mag) * adjustedMag;
         p.vy = (p.vy / mag) * adjustedMag;
 
@@ -549,7 +556,7 @@ export function FloatingTrackOrbs({
 
             if (softPadding > 2) {
               const cushionFactor = (softZone - dist) / softPadding;
-              const steer = cushionFactor * 0.015 * (1 - intenseBoost * 0.85) * speedFactor;
+              const steer = cushionFactor * 0.055 * (1 - intenseBoost * 0.85);
               a.vx -= nx * steer;
               a.vy -= ny * steer;
               b.vx += nx * steer;
@@ -672,44 +679,43 @@ export function FloatingTrackOrbs({
         fxCtx.save();
         fxCtx.globalCompositeOperation = 'lighter';
 
-        if (!prefersReducedMotion) {
-          for (let i = 0; i < physics.length; i++) {
-            const p = physics[i];
-            const st = orbRenderStates[i];
-            const rotRad =
-              p.shape === 'circle' || p.shape === 'heart'
-                ? 0
-                : p.phase * 0.22 * (i % 2 === 0 ? 1 : -1);
+        const rotSpeedFactor = prefersReducedMotion ? 0.1 : 0.22;
+        for (let i = 0; i < physics.length; i++) {
+          const p = physics[i];
+          const st = orbRenderStates[i];
+          const rotRad =
+            p.shape === 'circle' || p.shape === 'heart'
+              ? 0
+              : p.phase * rotSpeedFactor * (i % 2 === 0 ? 1 : -1);
 
-            renderOrbFxFrame({
-              ctx: fxCtx,
-              fxState: p.fxState,
-              fxMode: p.fxMode,
-              shape: p.shape,
-              orbIndex: i,
-              isActive: p.isActive,
-              cx: p.x + p.size / 2,
-              cy: p.y + p.size / 2,
-              vx: p.vx,
-              vy: p.vy,
-              radius: (p.size / 2) * st.baseScale,
-              rotRad,
-              phase: p.phase,
-              deform: st.deform,
-              impactAngleRad: p.impactAngleRad,
-              songHue,
-              melodyIntensity,
-              energyNorm,
-              intenseBoost,
-              beatKick,
-              smoothBass,
-              smoothHigh,
-              freqBuf,
-              playing,
-              layeredBg,
-              frameCounter,
-            });
-          }
+          renderOrbFxFrame({
+            ctx: fxCtx,
+            fxState: p.fxState,
+            fxMode: p.fxMode,
+            shape: p.shape,
+            orbIndex: i,
+            isActive: p.isActive,
+            cx: p.x + p.size / 2,
+            cy: p.y + p.size / 2,
+            vx: p.vx,
+            vy: p.vy,
+            radius: (p.size / 2) * st.baseScale,
+            rotRad,
+            phase: p.phase,
+            deform: st.deform,
+            impactAngleRad: p.impactAngleRad,
+            songHue,
+            melodyIntensity,
+            energyNorm,
+            intenseBoost,
+            beatKick,
+            smoothBass,
+            smoothHigh,
+            freqBuf,
+            playing,
+            layeredBg,
+            frameCounter,
+          });
         }
 
         for (let i = ripples.length - 1; i >= 0; i--) {
@@ -773,16 +779,17 @@ export function FloatingTrackOrbs({
         const sx = baseScale * (1 - deform);
         const sy = baseScale * (1 + deform);
         const deg = (p.impactAngleRad * 180) / Math.PI;
+        const rotSpeedFactor = prefersReducedMotion ? 0.1 : 0.22;
         const rotRad =
-          prefersReducedMotion || p.shape === 'circle' || p.shape === 'heart'
+          p.shape === 'circle' || p.shape === 'heart'
             ? 0
-            : p.phase * 0.22 * (i % 2 === 0 ? 1 : -1);
+            : p.phase * rotSpeedFactor * (i % 2 === 0 ? 1 : -1);
         const rotDeg = (rotRad * 180) / Math.PI;
 
         // Subtle beat-reactive micro-tremor & organic border-radius shudder (circles only)
         let tremorX = 0;
         let tremorY = 0;
-        if (playing && !prefersReducedMotion) {
+        if (playing) {
           if (p.shape === 'circle') {
             const shudderPct = Math.min(
               4.5,
@@ -797,7 +804,9 @@ export function FloatingTrackOrbs({
             el.style.borderRadius = '0px';
           }
 
-          const tremorAmp = Math.min(1.6, beatKick * (0.5 + intenseBoost * 1.5));
+          const tremorAmp = prefersReducedMotion
+            ? 0
+            : Math.min(1.6, beatKick * (0.5 + intenseBoost * 1.5));
           if (tremorAmp > 0.05) {
             tremorX = Math.sin(p.phase * 22 + i * 3.1) * tremorAmp;
             tremorY = Math.cos(p.phase * 25 + i * 2.4) * tremorAmp;
@@ -891,6 +900,12 @@ export function FloatingTrackOrbs({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
+              trackEvent('orb_click', {
+                action: spec.isActive ? 'toggle_play' : 'select_track',
+                fx_mode: spec.fxMode,
+                shape: spec.shape,
+                track_title: spec.track.title,
+              });
               if (spec.isActive) {
                 onTogglePlay();
               } else {
