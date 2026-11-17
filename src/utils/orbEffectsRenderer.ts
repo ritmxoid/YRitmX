@@ -23,8 +23,18 @@ export type OrbFxMode =
   | 'orbital_satellites'
   | 'prism_radar'
   | 'crystal_shards'
-  | 'vortex_spirals'
+  | 'radar_comet'
+  | 'radar_track'
+  | 'radar_star4'
+  | 'radar_sparkler'
   | 'combo_aurora_spark';
+
+export const RADAR_FX_MODES: OrbFxMode[] = [
+  'radar_comet',
+  'radar_track',
+  'radar_star4',
+  'radar_sparkler',
+];
 
 export const ORB_FX_MODES: OrbFxMode[] = [
   'ripples',
@@ -38,7 +48,10 @@ export const ORB_FX_MODES: OrbFxMode[] = [
   'orbital_satellites',
   'prism_radar',
   'crystal_shards',
-  'vortex_spirals',
+  'radar_comet',
+  'radar_track',
+  'radar_star4',
+  'radar_sparkler',
   'combo_aurora_spark',
 ];
 
@@ -88,9 +101,18 @@ export interface OrbFxState {
   shatterSpread: number;
   glitchTimer: number;
   glitchSeed: number;
+  radarPos: number;
+  radarDir: 1 | -1;
+  radarSpeedMult: number;
+  radarHueA: number;
+  radarHueB: number;
+  radarHueC: number;
 }
 
 export function createOrbFxState(): OrbFxState {
+  const hueA = Math.random() * 360;
+  const hueB = (hueA + 70 + Math.random() * 140) % 360;
+  const hueC = (hueB + 70 + Math.random() * 140) % 360;
   return {
     waveClones: [],
     particles: [],
@@ -98,6 +120,12 @@ export function createOrbFxState(): OrbFxState {
     shatterSpread: 0,
     glitchTimer: 0,
     glitchSeed: 0,
+    radarPos: Math.random(),
+    radarDir: Math.random() > 0.5 ? 1 : -1,
+    radarSpeedMult: 0.84 + Math.random() * 0.44,
+    radarHueA: hueA,
+    radarHueB: hueB,
+    radarHueC: hueC,
   };
 }
 
@@ -127,8 +155,13 @@ export function pickTrackOrbStyle(): { fxMode: OrbFxMode; shape: OrbShape } {
 export function pickCompanionOrbStyle(
   trackFx: OrbFxMode,
   _trackShape: OrbShape,
-  _companionIdx: number
+  companionIdx: number
 ): { fxMode: OrbFxMode; shape: OrbShape } {
+  if (RADAR_FX_MODES.includes(trackFx)) {
+    const startIdx = RADAR_FX_MODES.indexOf(trackFx);
+    const nextIdx = (startIdx + 1 + companionIdx) % RADAR_FX_MODES.length;
+    return { fxMode: RADAR_FX_MODES[nextIdx], shape: 'circle' };
+  }
   return { fxMode: trackFx, shape: 'circle' };
 }
 
@@ -423,8 +456,92 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
     void scaleR;
   }
 
-  // World-space particle FX (micro_trail, combo_aurora_spark)
-  if (fxMode === 'micro_trail' || fxMode === 'combo_aurora_spark') {
+  const sampleContourAt = (uRaw: number): { x: number; y: number; nx: number; ny: number } => {
+    const u = ((uRaw % 1) + 1) % 1;
+    const f = u * CONTOUR_SEGMENTS;
+    const k0 = Math.floor(f) % CONTOUR_SEGMENTS;
+    const k1 = (k0 + 1) % CONTOUR_SEGMENTS;
+    const frac = f - Math.floor(f);
+    const px = scratchX[k0] * (1 - frac) + scratchX[k1] * frac;
+    const py = scratchY[k0] * (1 - frac) + scratchY[k1] * frac;
+    const dist = Math.hypot(px, py) || 1;
+    return { x: px, y: py, nx: px / dist, ny: py / dist };
+  };
+
+  const isRadarMode =
+    fxMode === 'radar_comet' ||
+    fxMode === 'radar_track' ||
+    fxMode === 'radar_star4' ||
+    fxMode === 'radar_sparkler';
+
+  if (isRadarMode) {
+    const stepU =
+      (playing
+        ? 0.0036 + melodyIntensity * 0.0046 + beatKick * 0.0032
+        : 0.0018) * fxState.radarSpeedMult;
+    fxState.radarPos = (fxState.radarPos + fxState.radarDir * stepU + 10) % 1;
+  }
+
+  // World-space particle FX (micro_trail, combo_aurora_spark, radar_sparkler)
+  if (fxMode === 'radar_sparkler') {
+    const headLocal = sampleContourAt(fxState.radarPos);
+    let sx = headLocal.x;
+    let sy = headLocal.y;
+    let snx = headLocal.nx;
+    let sny = headLocal.ny;
+
+    if (rotRad !== 0) {
+      const cr = Math.cos(rotRad);
+      const sr = Math.sin(rotRad);
+      const rx = sx * cr - sy * sr;
+      const ry = sx * sr + sy * cr;
+      sx = rx;
+      sy = ry;
+      const rnx = snx * cr - sny * sr;
+      const rny = snx * sr + sny * cr;
+      snx = rnx;
+      sny = rny;
+    }
+
+    if (Math.abs(deform) > 0.0012) {
+      const ca = Math.cos(-impactAngleRad);
+      const sa = Math.sin(-impactAngleRad);
+      const dx = (sx * ca - sy * sa) * (1 - deform);
+      const dy = (sx * sa + sy * ca) * (1 + deform);
+      const ca2 = Math.cos(impactAngleRad);
+      const sa2 = Math.sin(impactAngleRad);
+      sx = dx * ca2 - dy * sa2;
+      sy = dx * sa2 + dy * sa2;
+    }
+
+    const wx = cx + sx;
+    const wy = cy + sy;
+    const maxSparklerParticles = layeredBg ? 22 : 38;
+    const spawnCount = playing ? (beatKick > 0.1 ? 3 : 2) : 1;
+
+    for (let s = 0; s < spawnCount && fxState.particles.length < maxSparklerParticles; s++) {
+      if (!playing && Math.random() > 0.45) break;
+      const spreadAngle = Math.atan2(sny, snx) + (Math.random() - 0.5) * 1.9;
+      const spd = 0.55 + Math.random() * (1.55 + melodyIntensity * 1.45 + beatKick * 1.1);
+      const palettePick = Math.random();
+      const sparkHue =
+        palettePick < 0.34
+          ? fxState.radarHueA
+          : palettePick < 0.67
+          ? fxState.radarHueB
+          : fxState.radarHueC;
+      fxState.particles.push({
+        x: wx + (Math.random() - 0.5) * 2.5,
+        y: wy + (Math.random() - 0.5) * 2.5,
+        vx: Math.cos(spreadAngle) * spd - vx * 0.25,
+        vy: Math.sin(spreadAngle) * spd - vy * 0.25,
+        life: 0,
+        maxLife: 16 + Math.random() * 18,
+        size: 0.9 + Math.random() * (1.2 + melodyIntensity * 1.1),
+        hue: (sparkHue + phase * 36 + Math.random() * 30) % 360,
+      });
+    }
+  } else if (fxMode === 'micro_trail' || fxMode === 'combo_aurora_spark') {
     const maxParticles = layeredBg ? 18 : 34;
     const spawnChance = playing ? (0.35 + melodyIntensity * 0.65) : 0.15;
     if (fxState.particles.length < maxParticles && Math.random() < spawnChance) {
@@ -451,7 +568,13 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
         });
       }
     }
+  }
 
+  if (
+    fxMode === 'radar_sparkler' ||
+    fxMode === 'micro_trail' ||
+    fxMode === 'combo_aurora_spark'
+  ) {
     for (let i = fxState.particles.length - 1; i >= 0; i--) {
       const pt = fxState.particles[i];
       pt.life += 1;
@@ -461,13 +584,13 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
       }
       pt.x += pt.vx;
       pt.y += pt.vy;
-      pt.vx *= 0.96;
-      pt.vy *= 0.96;
+      pt.vx *= 0.94;
+      pt.vy *= 0.94;
       const pProg = pt.life / pt.maxLife;
-      const pAlpha = (1 - pProg) * (0.4 + melodyIntensity * 0.55);
-      ctx.fillStyle = hslToCss(pt.hue, 90, 62 + melodyIntensity * 22, pAlpha);
+      const pAlpha = (1 - pProg) * (0.45 + melodyIntensity * 0.55);
+      ctx.fillStyle = hslToCss(pt.hue, 96, 66 + melodyIntensity * 22, pAlpha);
       ctx.beginPath();
-      ctx.arc(pt.x, pt.y, pt.size * (1 - pProg * 0.5), 0, Math.PI * 2);
+      ctx.arc(pt.x, pt.y, pt.size * (1 - pProg * 0.55), 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -837,29 +960,168 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
       ctx.lineWidth = 1.2 + melodyIntensity * 0.9;
       ctx.stroke();
     }
-  } else if (fxMode === 'vortex_spirals') {
-    strokeBaseGlowShape(0.8);
-    const armCount = layeredBg ? 2 : 3;
-    for (let a = 0; a < armCount; a++) {
-      const baseA = phase * 2.2 + (a * Math.PI * 2) / armCount;
-      ctx.beginPath();
-      for (let s = 0; s <= 14; s++) {
-        const t = s / 14;
-        const ang = baseA + t * 2.1;
-        const sr = r + 1 + t * (10 + melodyIntensity * 16 + beatKick * 8);
-        const px = Math.cos(ang) * sr;
-        const py = Math.sin(ang) * sr;
-        if (s === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
+  } else if (
+    fxMode === 'radar_comet' ||
+    fxMode === 'radar_track' ||
+    fxMode === 'radar_star4' ||
+    fxMode === 'radar_sparkler'
+  ) {
+    // Sleek subtle reactive outline + pulsing multicolor radar light racing along exact shape contour
+    strokeBaseGlowShape(0.48);
+
+    const pulseWave = 0.5 + 0.5 * Math.sin(phase * 4.4 + orbIndex * 1.5);
+    const pulseBoost = 1 + pulseWave * 0.28 + melodyIntensity * 0.38 + beatKick * 0.6;
+    const headHue = (fxState.radarHueA + phase * 38 + pulseWave * 36) % 360;
+    const midHue = (fxState.radarHueB + phase * 28) % 360;
+    const tailHue = (fxState.radarHueC + phase * 22) % 360;
+    const headPos = sampleContourAt(fxState.radarPos);
+    const baseAlpha = playing ? 0.65 + melodyIntensity * 0.35 : 0.42;
+
+    const lerpHue = (h1: number, h2: number, t: number): number => {
+      const diff = ((((h2 - h1) % 360) + 540) % 360) - 180;
+      return (h1 + diff * t + 360) % 360;
+    };
+
+    const drawGlowingTailSegment = (tailLenU: number, steps: number, maxWidth: number) => {
+      ctx.lineCap = 'round';
+      for (let s = 0; s < steps; s++) {
+        const t0 = s / steps;
+        const t1 = (s + 1) / steps;
+        const u0 = fxState.radarPos - fxState.radarDir * (1 - t0) * tailLenU;
+        const u1 = fxState.radarPos - fxState.radarDir * (1 - t1) * tailLenU;
+        const p0 = sampleContourAt(u0);
+        const p1 = sampleContourAt(u1);
+        const segHue =
+          t1 < 0.5
+            ? lerpHue(tailHue, midHue, t1 * 2)
+            : lerpHue(midHue, headHue, (t1 - 0.5) * 2);
+        const alpha = Math.pow(t1, 1.9) * baseAlpha * 0.82;
+        ctx.strokeStyle = hslToCss(segHue, 96, 62 + t1 * 24, alpha);
+        ctx.lineWidth = Math.max(0.5, t1 * maxWidth);
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.stroke();
       }
-      ctx.strokeStyle = hslToCss(
-        (orbHue + a * 90) % 360,
-        98,
-        62 + melodyIntensity * 26,
-        0.45 + melodyIntensity * 0.48
-      );
-      ctx.lineWidth = 1.5 + melodyIntensity * 1.2;
+    };
+
+    const drawRadialBeaconGlow = (x: number, y: number, glowR: number, hue: number, alpha: number) => {
+      const aura = ctx.createRadialGradient(x, y, 0.5, x, y, glowR);
+      aura.addColorStop(0, `rgba(255, 255, 255, ${Math.min(1, alpha * 0.95).toFixed(3)})`);
+      aura.addColorStop(0.28, hslToCss(hue, 100, 72, alpha * 0.85));
+      aura.addColorStop(0.65, hslToCss(midHue, 96, 58, alpha * 0.32));
+      aura.addColorStop(1, hslToCss(tailHue, 90, 50, 0));
+      ctx.fillStyle = aura;
+      ctx.beginPath();
+      ctx.arc(x, y, glowR, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
+    if (fxMode === 'radar_comet') {
+      drawGlowingTailSegment(0.28, 22, 2.8 + melodyIntensity * 2.0);
+      const glowR = (9 + melodyIntensity * 7 + beatKick * 6) * pulseBoost * 0.72;
+      drawRadialBeaconGlow(headPos.x, headPos.y, glowR, headHue, baseAlpha);
+      ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1, baseAlpha).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(headPos.x, headPos.y, 1.9 + melodyIntensity * 1.1, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (fxMode === 'radar_track') {
+      // Short thin lead filament + 20 fading luminous track pearls along the contour behind the head
+      drawGlowingTailSegment(0.08, 6, 1.8 + melodyIntensity * 1.1);
+      const dotCount = 20;
+      const trackSpanU = 0.42;
+      for (let d = 1; d <= dotCount; d++) {
+        const frac = d / dotCount; // 0 = near head, 1 = oldest tail dot
+        const pt = sampleContourAt(fxState.radarPos - fxState.radarDir * frac * trackSpanU);
+        const fade = Math.pow(1 - frac, 1.65);
+        const dotHue = (headHue + frac * 165) % 360;
+        const dotRadius = Math.max(0.55, (1 - frac * 0.72) * (2.1 + melodyIntensity * 1.2));
+        ctx.fillStyle = hslToCss(dotHue, 98, 66 + fade * 20, fade * baseAlpha * 0.88);
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, dotRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      const glowR = (8.5 + melodyIntensity * 6.5 + beatKick * 5) * pulseBoost * 0.7;
+      drawRadialBeaconGlow(headPos.x, headPos.y, glowR, headHue, baseAlpha);
+      ctx.strokeStyle = hslToCss(midHue, 100, 78, baseAlpha * (0.45 + pulseWave * 0.35));
+      ctx.lineWidth = 1.0;
+      ctx.beginPath();
+      ctx.arc(headPos.x, headPos.y, 3.6 + pulseWave * 2.4 + beatKick * 2.5, 0, Math.PI * 2);
       ctx.stroke();
+    } else if (fxMode === 'radar_star4') {
+      drawGlowingTailSegment(0.2, 16, 2.2 + melodyIntensity * 1.5);
+      const glowR = (10 + melodyIntensity * 7 + beatKick * 6) * pulseBoost * 0.72;
+      drawRadialBeaconGlow(headPos.x, headPos.y, glowR, headHue, baseAlpha * 0.85);
+
+      const starLen = (6.8 + melodyIntensity * 4.8 + beatKick * 4.5) * (0.85 + pulseWave * 0.3);
+      const starCross = starLen * 0.42;
+      const starAngle = phase * 1.8 * fxState.radarDir;
+      ctx.save();
+      ctx.translate(headPos.x, headPos.y);
+      ctx.rotate(starAngle);
+
+      // Primary 4-pointed radiant star
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const ang = (i * Math.PI) / 4;
+        const rad = i % 2 === 0 ? starLen : starLen * 0.2;
+        const sx = Math.cos(ang) * rad;
+        const sy = Math.sin(ang) * rad;
+        if (i === 0) ctx.moveTo(sx, sy);
+        else ctx.lineTo(sx, sy);
+      }
+      ctx.closePath();
+      ctx.fillStyle = hslToCss(headHue, 100, 82, Math.min(1, baseAlpha));
+      ctx.fill();
+
+      // Secondary subtle diagonal shimmer cross
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const ang = Math.PI / 4 + (i * Math.PI) / 4;
+        const rad = i % 2 === 0 ? starCross : starCross * 0.22;
+        const sx = Math.cos(ang) * rad;
+        const sy = Math.sin(ang) * rad;
+        if (i === 0) ctx.moveTo(sx, sy);
+        else ctx.lineTo(sx, sy);
+      }
+      ctx.closePath();
+      ctx.fillStyle = hslToCss(midHue, 100, 86, baseAlpha * 0.72);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, 0, 1.4 + melodyIntensity * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      // radar_sparkler: glowing ember trail + crackling multi-needle bengal sparkler core
+      drawGlowingTailSegment(0.14, 12, 2.1 + melodyIntensity * 1.3);
+      const glowR = (9 + melodyIntensity * 6.5 + beatKick * 5.5) * pulseBoost * 0.72;
+      drawRadialBeaconGlow(headPos.x, headPos.y, glowR, headHue, baseAlpha * 0.9);
+
+      const rayCount = 7;
+      ctx.lineCap = 'round';
+      for (let rIdx = 0; rIdx < rayCount; rIdx++) {
+        const rayAng =
+          (rIdx / rayCount) * Math.PI * 2 +
+          Math.sin(frameCounter * 0.55 + rIdx * 2.1) * 0.35;
+        const rayLen =
+          (4.2 + Math.random() * (4.8 + melodyIntensity * 5.5 + beatKick * 5.0));
+        const rayHue = rIdx % 2 === 0 ? headHue : midHue;
+        ctx.strokeStyle = hslToCss(rayHue, 100, 80, baseAlpha * (0.65 + Math.random() * 0.35));
+        ctx.lineWidth = 0.8 + Math.random() * 0.7;
+        ctx.beginPath();
+        ctx.moveTo(headPos.x, headPos.y);
+        ctx.lineTo(
+          headPos.x + Math.cos(rayAng) * rayLen,
+          headPos.y + Math.sin(rayAng) * rayLen
+        );
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(headPos.x, headPos.y, 1.8 + melodyIntensity * 0.9, 0, Math.PI * 2);
+      ctx.fill();
     }
   } else {
     // combo_aurora_spark: glowing wavy contour + beat spark spikes + subtle micro-arcs
