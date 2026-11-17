@@ -1,3 +1,5 @@
+import { getTranslations } from '../i18n/translations';
+
 const DB_NAME = 'yritmx_handles_db';
 const STORE_NAME = 'directory_handles';
 
@@ -57,6 +59,20 @@ export async function deleteDirectoryHandle(id: string): Promise<void> {
   }
 }
 
+export async function queryDirectoryPermission(
+  dirHandle: FileSystemDirectoryHandle
+): Promise<PermissionState> {
+  const handleWithPerm = dirHandle as FileSystemDirectoryHandle & {
+    queryPermission?: (opts: { mode: 'read' }) => Promise<PermissionState>;
+  };
+  if (!handleWithPerm.queryPermission) return 'prompt';
+  try {
+    return await handleWithPerm.queryPermission({ mode: 'read' });
+  } catch {
+    return 'prompt';
+  }
+}
+
 export async function readAudioFilesFromDirectoryHandle(
   dirHandle: FileSystemDirectoryHandle
 ): Promise<File[]> {
@@ -71,17 +87,18 @@ export async function readAudioFilesFromDirectoryHandle(
       state = await handleWithPerm.requestPermission({ mode: 'read' });
     }
     if (state !== 'granted') {
-      throw new Error('Доступ к папке не предоставлен');
+      throw new Error(getTranslations().errFolderPermission);
     }
   }
 
-  const audioFiles: File[] = [];
-  const collect = async (dir: FileSystemDirectoryHandle, depth = 0) => {
+  const audioFiles: Array<{ relPath: string; file: File }> = [];
+  const collect = async (dir: FileSystemDirectoryHandle, prefix = '', depth = 0) => {
     if (depth > 3) return;
     const iterable = dir as unknown as {
       values: () => AsyncIterable<FileSystemHandle>;
     };
     for await (const entry of iterable.values()) {
+      const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.kind === 'file') {
         const fileHandle = entry as FileSystemFileHandle;
         const file = await fileHandle.getFile();
@@ -89,14 +106,16 @@ export async function readAudioFilesFromDirectoryHandle(
           file.type.startsWith('audio/') ||
           /\.(mp3|flac|wav|ogg|m4a|aac)$/i.test(file.name)
         ) {
-          audioFiles.push(file);
+          audioFiles.push({ relPath, file });
         }
       } else if (entry.kind === 'directory') {
-        await collect(entry as FileSystemDirectoryHandle, depth + 1);
+        await collect(entry as FileSystemDirectoryHandle, relPath, depth + 1);
       }
     }
   };
 
   await collect(dirHandle);
-  return audioFiles;
+  audioFiles.sort((a, b) => a.relPath.localeCompare(b.relPath));
+  return audioFiles.map((item) => item.file);
 }
+

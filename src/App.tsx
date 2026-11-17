@@ -1,5 +1,6 @@
 import {
   Cloud,
+  Disc3,
   Download,
   Eye,
   EyeOff,
@@ -27,6 +28,7 @@ import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'r
 import { EqualizerModal } from './components/EqualizerModal';
 import { FloatingTrackOrbs } from './components/FloatingTrackOrbs';
 import {
+  FirstLaunchInstallModal,
   MobileMenuModal,
   MobilePlaylistModal,
   PWAInstallGuideModal,
@@ -56,8 +58,22 @@ import { useI18n } from './i18n/I18nContext';
 import { trackEvent } from './utils/analytics';
 import { DEFAULT_AUDIUS_HANDLE, fetchAudiusProfileTracks } from './utils/audiusApi';
 import { createDemoTracks } from './utils/demoAudioGenerator';
-import { deleteDirectoryHandle } from './utils/folderHandleStore';
+import {
+  deleteDirectoryHandle,
+  getDirectoryHandle,
+  queryDirectoryPermission,
+  readAudioFilesFromDirectoryHandle,
+  saveDirectoryHandle,
+} from './utils/folderHandleStore';
 import { parseAudioMetadata } from './utils/id3Parser';
+import {
+  ActiveSourceType,
+  loadPlaybackSession,
+  loadPlayerPrefs,
+  savePlaybackSession,
+  savePlayerPrefs,
+  SavedPlaybackSession,
+} from './utils/playbackSession';
 import { loadTracksFromUrlSource } from './utils/urlSourceParser';
 
 const STORAGE_PROFILES_KEY = 'yritmx_profiles';
@@ -65,6 +81,8 @@ const STORAGE_HANDLE_KEY = 'yritmx_current_handle';
 const STORAGE_FOLDERS_KEY = 'yritmx_saved_folders';
 const STORAGE_URLS_KEY = 'yritmx_saved_urls';
 const STORAGE_CAPTIONS_KEY = 'yritmx_orb_captions';
+const STORAGE_ORBS_KEY = 'yritmx_show_orbs';
+const STORAGE_INSTALL_PROMO_KEY = 'yritmx_install_promo_seen';
 
 // Ambient/backdrop layers that blend cleanly behind any foreground visualizer without clutter
 const AMBIENT_MIX_POOL = [0, 4, 8, 9, 10, 11, 12, 13, 16, 19, 20, 22, 24, 26];
@@ -146,8 +164,70 @@ function getInitialHandle(): string {
   }
 }
 
+interface RestoreOptions {
+  trackId?: string;
+  trackTitle?: string;
+  trackIndex?: number;
+  time?: number;
+}
+
+interface PendingFolderRestore {
+  folderId: string;
+  folderName: string;
+  trackId?: string;
+  trackTitle?: string;
+  trackArtist?: string;
+  trackIndex: number;
+  currentTime: number;
+  hasHandle: boolean;
+}
+
+function resolveRestoreTarget(
+  tracks: Track[],
+  restore?: RestoreOptions
+): { index: number; seekTime: number } {
+  if (!restore || tracks.length === 0) return { index: 0, seekTime: 0 };
+  let index = -1;
+  let matchedByIdentity = false;
+
+  if (restore.trackId) {
+    index = tracks.findIndex((track) => track.id === restore.trackId);
+    if (index !== -1) matchedByIdentity = true;
+  }
+  if (index === -1 && restore.trackTitle) {
+    const normalized = restore.trackTitle.trim().toLowerCase();
+    index = tracks.findIndex((track) => track.title.trim().toLowerCase() === normalized);
+    if (index !== -1) matchedByIdentity = true;
+  }
+  if (
+    index === -1 &&
+    typeof restore.trackIndex === 'number' &&
+    Number.isFinite(restore.trackIndex) &&
+    restore.trackIndex >= 0 &&
+    restore.trackIndex < tracks.length
+  ) {
+    index = restore.trackIndex;
+    matchedByIdentity = true;
+  }
+  if (index === -1) index = 0;
+
+  const seekTime =
+    matchedByIdentity &&
+    typeof restore.time === 'number' &&
+    Number.isFinite(restore.time) &&
+    restore.time > 0.5
+      ? restore.time
+      : 0;
+
+  return { index, seekTime };
+}
+
 export default function App() {
   const { t } = useI18n();
+  const initialPrefsRef = useRef(loadPlayerPrefs());
+  const initialSessionRef = useRef<SavedPlaybackSession | null>(loadPlaybackSession());
+  const initialRestoreConsumedRef = useRef(false);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -158,15 +238,30 @@ export default function App() {
   const folderCacheRef = useRef<Map<string, Track[]>>(new Map());
   const toastIdRef = useRef(1);
 
+  const activeSessionRef = useRef<{
+    sourceType: ActiveSourceType;
+    audiusHandle?: string;
+    url?: string;
+    folderId?: string;
+    folderName?: string;
+  } | null>(null);
+  const pendingSeekRef = useRef<{ src: string; time: number } | null>(null);
+  const lastTimeFlushRef = useRef(0);
+  const playlistRef = useRef<Track[]>([]);
+  const currentIndexRef = useRef(0);
+  const isPlayingRef = useRef(false);
+
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const [playlist, setPlaylist] = useState<Track[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [awaitingAutoplayUnlock, setAwaitingAutoplayUnlock] = useState(false);
-  const [isShuffle, setIsShuffle] = useState(false);
-  const [isRepeat, setIsRepeat] = useState(false);
-  const [volume, setVolume] = useState(0.8);
-  const [isMuted, setIsMuted] = useState(false);
+  const [pendingFolderRestore, setPendingFolderRestore] =
+    useState<PendingFolderRestore | null>(null);
+  const [isShuffle, setIsShuffle] = useState(() => initialPrefsRef.current.isShuffle);
+  const [isRepeat, setIsRepeat] = useState(() => initialPrefsRef.current.isRepeat);
+  const [volume, setVolume] = useState(() => initialPrefsRef.current.volume);
+  const [isMuted, setIsMuted] = useState(() => initialPrefsRef.current.isMuted);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
@@ -177,6 +272,14 @@ export default function App() {
     createRandomVisualDna(0, true)
   );
   const [autoVisualPerTrack, setAutoVisualPerTrack] = useState(true);
+  const [showOrbs, setShowOrbs] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_ORBS_KEY);
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
   const [showOrbCaptions, setShowOrbCaptions] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_CAPTIONS_KEY);
@@ -185,7 +288,7 @@ export default function App() {
       return true;
     }
   });
-  const [eqGains, setEqGains] = useState<number[]>([0, 0, 0, 0, 0]);
+  const [eqGains, setEqGains] = useState<number[]>(() => initialPrefsRef.current.eqGains);
   const [uiVisible, setUiVisible] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -230,6 +333,7 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobilePlaylistOpen, setIsMobilePlaylistOpen] = useState(false);
   const [isInstallGuideOpen, setIsInstallGuideOpen] = useState(false);
+  const [isInstallPromoOpen, setIsInstallPromoOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const { isInstallable, isInstalled, isIOS, promptInstall } = usePWAInstall();
@@ -362,6 +466,20 @@ export default function App() {
     });
   }, [showToast, t.mixDisabledToast, t.mixEnabledToast, vizMode]);
 
+  const toggleOrbs = useCallback(() => {
+    setShowOrbs((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(STORAGE_ORBS_KEY, String(next));
+      } catch {
+        // ignore storage errors
+      }
+      showToast(next ? t.orbsEnabledToast : t.orbsDisabledToast, 'info');
+      trackEvent('orbs_visibility_toggle', { enabled: next });
+      return next;
+    });
+  }, [showToast, t.orbsDisabledToast, t.orbsEnabledToast]);
+
   const toggleOrbCaptions = useCallback(() => {
     setShowOrbCaptions((prev) => {
       const next = !prev;
@@ -385,6 +503,75 @@ export default function App() {
       (t) => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q)
     );
   }, [playlist, searchQuery]);
+
+  // Keep live refs synced for unload/visibility session flushing
+  useEffect(() => {
+    playlistRef.current = playlist;
+  }, [playlist]);
+
+  useEffect(() => {
+    currentIndexRef.current = currentIndex;
+  }, [currentIndex]);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  const persistCurrentSession = useCallback(
+    (overrides?: Partial<SavedPlaybackSession>) => {
+      const active = activeSessionRef.current;
+      if (!active && !overrides?.sourceType) return;
+
+      const list = playlistRef.current;
+      const idx = overrides?.trackIndex ?? currentIndexRef.current;
+      const track = list[idx];
+      const audioTime = audioRef.current?.currentTime;
+      const resolvedTime =
+        overrides?.currentTime ??
+        (typeof audioTime === 'number' && Number.isFinite(audioTime) ? audioTime : 0);
+
+      savePlaybackSession({
+        sourceType: overrides?.sourceType ?? active!.sourceType,
+        audiusHandle: overrides?.audiusHandle ?? active?.audiusHandle,
+        url: overrides?.url ?? active?.url,
+        folderId: overrides?.folderId ?? active?.folderId,
+        folderName: overrides?.folderName ?? active?.folderName,
+        trackId: overrides?.trackId ?? track?.id,
+        trackTitle: overrides?.trackTitle ?? track?.title,
+        trackArtist: overrides?.trackArtist ?? track?.artist,
+        trackIndex: idx,
+        currentTime: Math.max(0, resolvedTime),
+        wasPlaying: overrides?.wasPlaying ?? isPlayingRef.current,
+        updatedAt: Date.now(),
+      });
+    },
+    []
+  );
+
+  // Flush final playback position & playing state when app hides or closes
+  useEffect(() => {
+    const flush = () => {
+      persistCurrentSession();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        flush();
+      }
+    };
+    window.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
+    return () => {
+      window.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('beforeunload', flush);
+    };
+  }, [persistCurrentSession]);
+
+  // Persist player preferences across sessions
+  useEffect(() => {
+    savePlayerPrefs({ volume, isMuted, isShuffle, isRepeat, eqGains });
+  }, [eqGains, isMuted, isRepeat, isShuffle, volume]);
 
   // Sync volume
   useEffect(() => {
@@ -445,7 +632,11 @@ export default function App() {
   // Unlock AudioContext & start playback on first user gesture if autoplay was blocked
   useEffect(() => {
     if (!awaitingAutoplayUnlock) return;
-    const unlock = () => {
+    const unlock = (ev: Event) => {
+      const target = ev.target as HTMLElement | null;
+      if (target?.closest('[data-play-toggle="true"]')) {
+        return;
+      }
       ensureAudioGraph();
       if (audioRef.current && audioRef.current.src) {
         void audioRef.current
@@ -453,6 +644,10 @@ export default function App() {
           .then(() => {
             setIsPlaying(true);
             setAwaitingAutoplayUnlock(false);
+            persistCurrentSession({
+              currentTime: audioRef.current?.currentTime ?? 0,
+              wasPlaying: true,
+            });
           })
           .catch(() => {});
       }
@@ -463,7 +658,7 @@ export default function App() {
       window.removeEventListener('pointerdown', unlock);
       window.removeEventListener('keydown', unlock);
     };
-  }, [awaitingAutoplayUnlock, ensureAudioGraph]);
+  }, [awaitingAutoplayUnlock, ensureAudioGraph, persistCurrentSession]);
 
   // Attach FFT analyser on first interaction if autoplay succeeded automatically
   useEffect(() => {
@@ -480,26 +675,51 @@ export default function App() {
   }, [analyser, ensureAudioGraph, isPlaying]);
 
   const loadAudiusTracks = useCallback(
-    async (handle: string, options?: { closeModal?: boolean; autoPlay?: boolean; isInitial?: boolean }) => {
+    async (
+      handle: string,
+      options?: {
+        closeModal?: boolean;
+        autoPlay?: boolean;
+        isInitial?: boolean;
+        restore?: RestoreOptions;
+      }
+    ) => {
       setIsLoadingTracks(true);
       setLoadError(null);
+      pendingSeekRef.current = null;
       try {
         const { tracks, resolvedHandle } = await fetchAudiusProfileTracks(handle);
         revokeLocalObjectUrls();
+
+        const { index, seekTime } = resolveRestoreTarget(tracks, options?.restore);
+        const targetTrack = tracks[index];
+
+        playlistRef.current = tracks;
+        currentIndexRef.current = index;
+        setPendingFolderRestore(null);
         setPlaylist(tracks);
-        setCurrentIndex(0);
-        setCurrentTime(0);
-        setDuration(tracks[0]?.durationHint ?? 0);
+        setCurrentIndex(index);
+        setCurrentTime(seekTime);
+        setDuration(targetTrack?.durationHint ?? 0);
         setActiveFolderId(null);
         setActiveUrlId(null);
+
+        activeSessionRef.current = {
+          sourceType: 'audius',
+          audiusHandle: resolvedHandle,
+        };
+        initialRestoreConsumedRef.current = true;
 
         if (autoVisualPerTrack) {
           randomizeVisual();
         }
 
-        if (audioRef.current && tracks[0]) {
+        if (audioRef.current && targetTrack) {
           audioRef.current.pause();
-          audioRef.current.src = tracks[0].src;
+          if (seekTime > 0) {
+            pendingSeekRef.current = { src: targetTrack.src, time: seekTime };
+          }
+          audioRef.current.src = targetTrack.src;
         }
 
         saveProfileToHistory(resolvedHandle);
@@ -510,8 +730,9 @@ export default function App() {
         });
         if (options?.closeModal) setIsSourcesOpen(false);
 
+        let started = false;
         if (options?.autoPlay) {
-          const started = await startPlaybackSafe(!options.isInitial);
+          started = await startPlaybackSafe(!options.isInitial);
           if (started) {
             if (!options.isInitial) {
               showToast(t.audiusPlayingToast(resolvedHandle, tracks.length), 'success');
@@ -522,9 +743,20 @@ export default function App() {
               showToast(t.audiusLoadedToast(resolvedHandle, tracks.length), 'success');
             }
           }
-        } else {
+        } else if (!options?.isInitial) {
           showToast(t.audiusLoadedToast(resolvedHandle, tracks.length), 'success');
         }
+
+        persistCurrentSession({
+          sourceType: 'audius',
+          audiusHandle: resolvedHandle,
+          trackId: targetTrack?.id,
+          trackTitle: targetTrack?.title,
+          trackArtist: targetTrack?.artist,
+          trackIndex: index,
+          currentTime: seekTime,
+          wasPlaying: started,
+        });
       } catch (err) {
         if (options?.isInitial && typeof navigator !== 'undefined' && !navigator.onLine) {
           setLoadError(null);
@@ -537,100 +769,130 @@ export default function App() {
         setIsLoadingTracks(false);
       }
     },
-    [autoVisualPerTrack, randomizeVisual, revokeLocalObjectUrls, saveProfileToHistory, showToast, startPlaybackSafe, t]
+    [
+      autoVisualPerTrack,
+      persistCurrentSession,
+      randomizeVisual,
+      revokeLocalObjectUrls,
+      saveProfileToHistory,
+      showToast,
+      startPlaybackSafe,
+      t,
+    ]
   );
 
-  // Track browser online/offline transitions smoothly
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+  const handleTriggerDemo = useCallback(
+    async (options?: {
+      autoPlay?: boolean;
+      isInitial?: boolean;
+      restore?: RestoreOptions;
+    }) => {
+      try {
+        if (!options?.isInitial) {
+          ensureAudioGraph();
+        }
+        setIsLoadingTracks(true);
+        setLoadError(null);
+        pendingSeekRef.current = null;
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
+        const demoTracks = await createDemoTracks();
+        revokeLocalObjectUrls();
 
-  // Auto-load & auto-attempt playback of RitmXoid on startup when online
-  useEffect(() => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      setIsLoadingTracks(false);
-      setLoadError(null);
-      return;
-    }
-    void loadAudiusTracks(currentHandle || DEFAULT_AUDIUS_HANDLE, {
-      autoPlay: true,
-      isInitial: true,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+        const { index, seekTime } = resolveRestoreTarget(demoTracks, options?.restore);
+        const targetTrack = demoTracks[index];
 
-  // Automatically load Audius profile when connection returns if playlist is still empty
-  useEffect(() => {
-    if (isOnline && playlist.length === 0 && !isLoadingTracks) {
-      void loadAudiusTracks(currentHandle || DEFAULT_AUDIUS_HANDLE, {
-        autoPlay: false,
-        isInitial: true,
+        playlistRef.current = demoTracks;
+        currentIndexRef.current = index;
+        setPendingFolderRestore(null);
+        setPlaylist(demoTracks);
+        setCurrentIndex(index);
+        setCurrentTime(seekTime);
+        setDuration(targetTrack?.durationHint ?? 24);
+        setActiveFolderId(null);
+        setActiveUrlId(null);
+
+        activeSessionRef.current = { sourceType: 'demo' };
+        initialRestoreConsumedRef.current = true;
+
+        if (autoVisualPerTrack) {
+          randomizeVisual();
+        }
+
+        let started = false;
+        const shouldPlay = options?.autoPlay ?? true;
+        if (audioRef.current && targetTrack) {
+          if (seekTime > 0) {
+            pendingSeekRef.current = { src: targetTrack.src, time: seekTime };
+          }
+          audioRef.current.src = targetTrack.src;
+          if (shouldPlay) {
+            started = await startPlaybackSafe(!options?.isInitial);
+            if (!started) {
+              setAwaitingAutoplayUnlock(true);
+            }
+          }
+        }
+
+        persistCurrentSession({
+          sourceType: 'demo',
+          trackId: targetTrack?.id,
+          trackTitle: targetTrack?.title,
+          trackArtist: targetTrack?.artist,
+          trackIndex: index,
+          currentTime: seekTime,
+          wasPlaying: started,
+        });
+
+        trackEvent('source_demo_start', { track_count: demoTracks.length });
+        if (!options?.isInitial) {
+          showToast(t.demoStartedToast, 'success');
+        }
+      } catch {
+        showToast(t.demoFailedToast, 'error');
+      } finally {
+        setIsLoadingTracks(false);
+      }
+    },
+    [
+      autoVisualPerTrack,
+      ensureAudioGraph,
+      persistCurrentSession,
+      randomizeVisual,
+      revokeLocalObjectUrls,
+      showToast,
+      startPlaybackSafe,
+      t,
+    ]
+  );
+
+  const loadParsedAudioFiles = useCallback(
+    async (
+      files: File[],
+      folderId: string,
+      folderName: string,
+      options?: {
+        saveHandle?: FileSystemDirectoryHandle;
+        restore?: RestoreOptions;
+        closeModal?: boolean;
+        autoPlay?: boolean;
+        isInitial?: boolean;
+        toastType?: 'loaded' | 'opened';
+      }
+    ) => {
+      const sortedFiles = [...files].sort((a, b) => {
+        const relA = (a.webkitRelativePath || a.name).toLowerCase();
+        const relB = (b.webkitRelativePath || b.name).toLowerCase();
+        return relA.localeCompare(relB);
       });
-    }
-  }, [currentHandle, isLoadingTracks, isOnline, loadAudiusTracks, playlist.length]);
-
-  const handleTriggerDemo = useCallback(async () => {
-    try {
-      ensureAudioGraph();
-      setIsLoadingTracks(true);
-      setLoadError(null);
-      const demoTracks = await createDemoTracks();
-      revokeLocalObjectUrls();
-      setPlaylist(demoTracks);
-      setCurrentIndex(0);
-      setCurrentTime(0);
-      setDuration(demoTracks[0].durationHint ?? 24);
-      setActiveFolderId(null);
-      setActiveUrlId(null);
-      if (autoVisualPerTrack) {
-        randomizeVisual();
-      }
-      if (audioRef.current) {
-        audioRef.current.src = demoTracks[0].src;
-        await audioRef.current.play();
-        setIsPlaying(true);
-        setAwaitingAutoplayUnlock(false);
-      }
-      trackEvent('source_demo_start', { track_count: demoTracks.length });
-      showToast(t.demoStartedToast, 'success');
-    } catch {
-      showToast(t.demoFailedToast, 'error');
-    } finally {
-      setIsLoadingTracks(false);
-    }
-  }, [autoVisualPerTrack, ensureAudioGraph, randomizeVisual, revokeLocalObjectUrls, showToast, t]);
-
-  const handleSelectFolderInputFiles = useCallback(
-    async (fileList: FileList | null) => {
-      if (!fileList || fileList.length === 0) return;
-      const files = Array.from(fileList).filter(
-        (f) => f.type.startsWith('audio/') || /\.(mp3|flac|wav|ogg|m4a|aac)$/i.test(f.name)
-      );
-
-      if (files.length === 0) {
-        showToast(t.noAudioInFolderToast, 'error');
-        return;
-      }
-
-      const firstRel = files[0]?.webkitRelativePath;
-      const folderName = firstRel ? firstRel.split('/')[0] : t.localFilesLabel;
-      const folderId = `folder-${hashString(folderName + '-' + files.length)}`;
 
       setIsParsingFiles(true);
+      pendingSeekRef.current = null;
       try {
         const parsedTracks: Track[] = [];
         const newObjectUrls: string[] = [];
 
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
+        for (let i = 0; i < sortedFiles.length; i++) {
+          const file = sortedFiles[i];
           const audioUrl = URL.createObjectURL(file);
           newObjectUrls.push(audioUrl);
           const tags = await parseAudioMetadata(file);
@@ -647,6 +909,10 @@ export default function App() {
           });
         }
 
+        if (options?.saveHandle) {
+          await saveDirectoryHandle(folderId, options.saveHandle);
+        }
+
         objectUrlsRef.current.push(...newObjectUrls);
         folderCacheRef.current.set(folderId, parsedTracks);
 
@@ -655,11 +921,18 @@ export default function App() {
           name: folderName,
           trackCount: parsedTracks.length,
           addedAt: Date.now(),
+          hasDirectoryHandle: Boolean(options?.saveHandle),
         };
 
         setSavedFolders((prev) => {
+          const existing = prev.find((f) => f.id === folderId || f.name === folderName);
+          const mergedEntry: SavedFolderEntry = {
+            ...entry,
+            hasDirectoryHandle:
+              Boolean(options?.saveHandle) || Boolean(existing?.hasDirectoryHandle),
+          };
           const filtered = prev.filter((f) => f.id !== folderId && f.name !== folderName);
-          const next = [entry, ...filtered];
+          const next = [mergedEntry, ...filtered];
           try {
             localStorage.setItem(STORAGE_FOLDERS_KEY, JSON.stringify(next));
           } catch {
@@ -668,64 +941,264 @@ export default function App() {
           return next;
         });
 
+        const { index, seekTime } = resolveRestoreTarget(parsedTracks, options?.restore);
+        const targetTrack = parsedTracks[index];
+
+        playlistRef.current = parsedTracks;
+        currentIndexRef.current = index;
+        setPendingFolderRestore(null);
         setPlaylist(parsedTracks);
-        setCurrentIndex(0);
-        setCurrentTime(0);
+        setCurrentIndex(index);
+        setCurrentTime(seekTime);
         setDuration(0);
         setLoadError(null);
         setActiveFolderId(folderId);
         setActiveUrlId(null);
-        setIsSourcesOpen(false);
+        if (options?.closeModal !== false) {
+          setIsSourcesOpen(false);
+        }
+
+        activeSessionRef.current = {
+          sourceType: 'folder',
+          folderId,
+          folderName,
+        };
+        initialRestoreConsumedRef.current = true;
 
         if (autoVisualPerTrack) {
           randomizeVisual();
         }
 
-        if (audioRef.current && parsedTracks[0]) {
-          audioRef.current.src = parsedTracks[0].src;
-          await startPlaybackSafe(true);
+        let started = false;
+        const shouldPlay = options?.autoPlay ?? true;
+        if (audioRef.current && targetTrack) {
+          if (seekTime > 0) {
+            pendingSeekRef.current = { src: targetTrack.src, time: seekTime };
+          }
+          audioRef.current.src = targetTrack.src;
+          if (shouldPlay) {
+            started = await startPlaybackSafe(!options?.isInitial);
+            if (!started) {
+              setAwaitingAutoplayUnlock(true);
+            }
+          }
         }
+
+        persistCurrentSession({
+          sourceType: 'folder',
+          folderId,
+          folderName,
+          trackId: targetTrack?.id,
+          trackTitle: targetTrack?.title,
+          trackArtist: targetTrack?.artist,
+          trackIndex: index,
+          currentTime: seekTime,
+          wasPlaying: started,
+        });
+
         trackEvent('source_folder_load', {
           folder_name: folderName,
           track_count: parsedTracks.length,
         });
-        showToast(t.folderLoadedToast(folderName, parsedTracks.length), 'success');
+        if (!options?.isInitial) {
+          showToast(
+            options?.toastType === 'opened'
+              ? t.folderOpenedToast(folderName)
+              : t.folderLoadedToast(folderName, parsedTracks.length),
+            'success'
+          );
+        }
       } finally {
         setIsParsingFiles(false);
       }
     },
-    [autoVisualPerTrack, randomizeVisual, showToast, startPlaybackSafe, t]
+    [autoVisualPerTrack, persistCurrentSession, randomizeVisual, showToast, startPlaybackSafe, t]
+  );
+
+  const handleSelectDirectoryPicker = useCallback(async () => {
+    const pickerFn = (
+      window as unknown as {
+        showDirectoryPicker?: (opts?: {
+          mode?: 'read' | 'readwrite';
+        }) => Promise<FileSystemDirectoryHandle>;
+      }
+    ).showDirectoryPicker;
+    if (!pickerFn) return;
+
+    try {
+      const dirHandle = await pickerFn({ mode: 'read' });
+      const files = await readAudioFilesFromDirectoryHandle(dirHandle);
+      if (files.length === 0) {
+        showToast(t.noAudioInFolderToast, 'error');
+        return;
+      }
+
+      const folderName = dirHandle.name || t.localFilesLabel;
+      const folderId = `folder-${hashString(folderName + '-' + files.length)}`;
+      const matchingPending =
+        pendingFolderRestore &&
+        (pendingFolderRestore.folderId === folderId ||
+          pendingFolderRestore.folderName === folderName)
+          ? {
+              trackId: pendingFolderRestore.trackId,
+              trackTitle: pendingFolderRestore.trackTitle,
+              trackIndex: pendingFolderRestore.trackIndex,
+              time: pendingFolderRestore.currentTime,
+            }
+          : undefined;
+
+      await loadParsedAudioFiles(files, folderId, folderName, {
+        saveHandle: dirHandle,
+        restore: matchingPending,
+        closeModal: true,
+        autoPlay: true,
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
+      showToast(t.noAudioInFolderToast, 'error');
+    }
+  }, [loadParsedAudioFiles, pendingFolderRestore, showToast, t]);
+
+  const handleSelectFolderInputFiles = useCallback(
+    async (fileList: FileList | null) => {
+      if (!fileList || fileList.length === 0) return;
+      const files = Array.from(fileList).filter(
+        (f) => f.type.startsWith('audio/') || /\.(mp3|flac|wav|ogg|m4a|aac)$/i.test(f.name)
+      );
+
+      if (files.length === 0) {
+        showToast(t.noAudioInFolderToast, 'error');
+        return;
+      }
+
+      const firstRel = files[0]?.webkitRelativePath;
+      const folderName = firstRel ? firstRel.split('/')[0] : t.localFilesLabel;
+      const folderId = `folder-${hashString(folderName + '-' + files.length)}`;
+      const matchingPending =
+        pendingFolderRestore &&
+        (pendingFolderRestore.folderId === folderId ||
+          pendingFolderRestore.folderName === folderName)
+          ? {
+              trackId: pendingFolderRestore.trackId,
+              trackTitle: pendingFolderRestore.trackTitle,
+              trackIndex: pendingFolderRestore.trackIndex,
+              time: pendingFolderRestore.currentTime,
+            }
+          : undefined;
+
+      await loadParsedAudioFiles(files, folderId, folderName, {
+        restore: matchingPending,
+        closeModal: true,
+        autoPlay: true,
+      });
+    },
+    [loadParsedAudioFiles, pendingFolderRestore, showToast, t]
   );
 
   const handleSelectSavedFolder = useCallback(
     async (folder: SavedFolderEntry) => {
+      const matchingPending =
+        pendingFolderRestore &&
+        (pendingFolderRestore.folderId === folder.id ||
+          pendingFolderRestore.folderName === folder.name)
+          ? {
+              trackId: pendingFolderRestore.trackId,
+              trackTitle: pendingFolderRestore.trackTitle,
+              trackIndex: pendingFolderRestore.trackIndex,
+              time: pendingFolderRestore.currentTime,
+            }
+          : undefined;
+
       const cached = folderCacheRef.current.get(folder.id);
       if (cached && cached.length > 0) {
+        const { index, seekTime } = resolveRestoreTarget(cached, matchingPending);
+        const targetTrack = cached[index];
+
+        pendingSeekRef.current = null;
+        playlistRef.current = cached;
+        currentIndexRef.current = index;
+        setPendingFolderRestore(null);
         setPlaylist(cached);
-        setCurrentIndex(0);
-        setCurrentTime(0);
+        setCurrentIndex(index);
+        setCurrentTime(seekTime);
         setDuration(0);
         setActiveFolderId(folder.id);
         setActiveUrlId(null);
         setIsSourcesOpen(false);
+        activeSessionRef.current = {
+          sourceType: 'folder',
+          folderId: folder.id,
+          folderName: folder.name,
+        };
+        initialRestoreConsumedRef.current = true;
+
         if (autoVisualPerTrack) randomizeVisual();
-        if (audioRef.current) {
-          audioRef.current.src = cached[0].src;
-          await startPlaybackSafe(true);
+        let started = false;
+        if (audioRef.current && targetTrack) {
+          if (seekTime > 0) {
+            pendingSeekRef.current = { src: targetTrack.src, time: seekTime };
+          }
+          audioRef.current.src = targetTrack.src;
+          started = await startPlaybackSafe(true);
         }
+        persistCurrentSession({
+          sourceType: 'folder',
+          folderId: folder.id,
+          folderName: folder.name,
+          trackId: targetTrack?.id,
+          trackTitle: targetTrack?.title,
+          trackArtist: targetTrack?.artist,
+          trackIndex: index,
+          currentTime: seekTime,
+          wasPlaying: started,
+        });
         showToast(t.folderOpenedToast(folder.name), 'success');
         return;
       }
 
+      const dirHandle = await getDirectoryHandle(folder.id);
+      if (dirHandle) {
+        const files = await readAudioFilesFromDirectoryHandle(dirHandle);
+        if (files.length > 0) {
+          await loadParsedAudioFiles(files, folder.id, folder.name, {
+            saveHandle: dirHandle,
+            restore: matchingPending,
+            closeModal: true,
+            autoPlay: true,
+            toastType: 'opened',
+          });
+          return;
+        }
+      }
+
       showToast(t.reselectFolderToast(folder.name), 'info');
     },
-    [autoVisualPerTrack, randomizeVisual, showToast, startPlaybackSafe, t]
+    [
+      autoVisualPerTrack,
+      loadParsedAudioFiles,
+      pendingFolderRestore,
+      persistCurrentSession,
+      randomizeVisual,
+      showToast,
+      startPlaybackSafe,
+      t,
+    ]
   );
 
   const handleLoadUrlSource = useCallback(
-    async (rawUrl: string) => {
+    async (
+      rawUrl: string,
+      options?: {
+        autoPlay?: boolean;
+        isInitial?: boolean;
+        restore?: RestoreOptions;
+      }
+    ) => {
       setIsLoadingUrl(true);
       setLoadError(null);
+      pendingSeekRef.current = null;
       try {
         const { tracks, label, normalizedUrl } = await loadTracksFromUrlSource(rawUrl);
         revokeLocalObjectUrls();
@@ -749,36 +1222,258 @@ export default function App() {
           return next;
         });
 
+        const { index, seekTime } = resolveRestoreTarget(tracks, options?.restore);
+        const targetTrack = tracks[index];
+
+        playlistRef.current = tracks;
+        currentIndexRef.current = index;
+        setPendingFolderRestore(null);
         setPlaylist(tracks);
-        setCurrentIndex(0);
-        setCurrentTime(0);
-        setDuration(tracks[0]?.durationHint ?? 0);
+        setCurrentIndex(index);
+        setCurrentTime(seekTime);
+        setDuration(targetTrack?.durationHint ?? 0);
         setActiveUrlId(urlId);
         setActiveFolderId(null);
-        setIsSourcesOpen(false);
+        if (!options?.isInitial) {
+          setIsSourcesOpen(false);
+        }
+
+        activeSessionRef.current = {
+          sourceType: 'url',
+          url: normalizedUrl,
+        };
+        initialRestoreConsumedRef.current = true;
 
         if (autoVisualPerTrack) {
           randomizeVisual();
         }
 
-        if (audioRef.current && tracks[0]) {
-          audioRef.current.src = tracks[0].src;
-          await startPlaybackSafe(true);
+        let started = false;
+        const shouldPlay = options?.autoPlay ?? true;
+        if (audioRef.current && targetTrack) {
+          if (seekTime > 0) {
+            pendingSeekRef.current = { src: targetTrack.src, time: seekTime };
+          }
+          audioRef.current.src = targetTrack.src;
+          if (shouldPlay) {
+            started = await startPlaybackSafe(!options?.isInitial);
+            if (!started) {
+              setAwaitingAutoplayUnlock(true);
+            }
+          }
         }
+
+        persistCurrentSession({
+          sourceType: 'url',
+          url: normalizedUrl,
+          trackId: targetTrack?.id,
+          trackTitle: targetTrack?.title,
+          trackArtist: targetTrack?.artist,
+          trackIndex: index,
+          currentTime: seekTime,
+          wasPlaying: started,
+        });
+
         trackEvent('source_url_load', {
           label,
           track_count: tracks.length,
         });
-        showToast(t.urlLoadedToast(tracks.length), 'success');
+        if (!options?.isInitial) {
+          showToast(t.urlLoadedToast(tracks.length), 'success');
+        }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : t.urlErrorFallback;
-        showToast(msg, 'error');
+        if (options?.isInitial && typeof navigator !== 'undefined' && !navigator.onLine) {
+          setLoadError(null);
+        } else {
+          const msg = err instanceof Error ? err.message : t.urlErrorFallback;
+          if (options?.isInitial) setLoadError(msg);
+          showToast(msg, 'error');
+        }
       } finally {
         setIsLoadingUrl(false);
+        if (options?.isInitial) {
+          setIsLoadingTracks(false);
+        }
       }
     },
-    [autoVisualPerTrack, randomizeVisual, revokeLocalObjectUrls, showToast, startPlaybackSafe, t]
+    [
+      autoVisualPerTrack,
+      persistCurrentSession,
+      randomizeVisual,
+      revokeLocalObjectUrls,
+      showToast,
+      startPlaybackSafe,
+      t,
+    ]
   );
+
+  // Track browser online/offline transitions smoothly
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Restore last active playlist/source, exact track, and playback position on startup
+  useEffect(() => {
+    const session = initialSessionRef.current;
+    const restore: RestoreOptions | undefined = session
+      ? {
+          trackId: session.trackId,
+          trackTitle: session.trackTitle,
+          trackIndex: session.trackIndex,
+          time: session.currentTime,
+        }
+      : undefined;
+    const online = typeof navigator === 'undefined' ? true : navigator.onLine;
+
+    if (session?.sourceType === 'demo') {
+      setIsLoadingTracks(true);
+      void handleTriggerDemo({
+        isInitial: true,
+        autoPlay: session.wasPlaying !== false,
+        restore,
+      });
+      return;
+    }
+
+    if (session?.sourceType === 'folder' && session.folderId) {
+      const folderId = session.folderId;
+      const folderName = session.folderName || t.localFilesLabel;
+      setIsLoadingTracks(true);
+      void (async () => {
+        try {
+          const dirHandle = await getDirectoryHandle(folderId);
+          if (dirHandle) {
+            const perm = await queryDirectoryPermission(dirHandle);
+            if (perm === 'granted') {
+              const files = await readAudioFilesFromDirectoryHandle(dirHandle);
+              if (files.length > 0) {
+                await loadParsedAudioFiles(files, folderId, folderName, {
+                  saveHandle: dirHandle,
+                  restore,
+                  closeModal: false,
+                  autoPlay: session.wasPlaying !== false,
+                  isInitial: true,
+                  toastType: 'opened',
+                });
+                return;
+              }
+            }
+          }
+          setPendingFolderRestore({
+            folderId,
+            folderName,
+            trackId: session.trackId,
+            trackTitle: session.trackTitle,
+            trackArtist: session.trackArtist,
+            trackIndex: session.trackIndex ?? 0,
+            currentTime: session.currentTime ?? 0,
+            hasHandle: Boolean(dirHandle),
+          });
+          initialRestoreConsumedRef.current = true;
+        } catch {
+          setPendingFolderRestore({
+            folderId,
+            folderName,
+            trackId: session.trackId,
+            trackTitle: session.trackTitle,
+            trackArtist: session.trackArtist,
+            trackIndex: session.trackIndex ?? 0,
+            currentTime: session.currentTime ?? 0,
+            hasHandle: false,
+          });
+          initialRestoreConsumedRef.current = true;
+        } finally {
+          setIsLoadingTracks(false);
+        }
+      })();
+      return;
+    }
+
+    if (session?.sourceType === 'url' && session.url) {
+      if (!online) {
+        setIsLoadingTracks(false);
+        setLoadError(null);
+        return;
+      }
+      setIsLoadingTracks(true);
+      void handleLoadUrlSource(session.url, {
+        isInitial: true,
+        autoPlay: session.wasPlaying !== false,
+        restore,
+      });
+      return;
+    }
+
+    if (!online) {
+      setIsLoadingTracks(false);
+      setLoadError(null);
+      return;
+    }
+
+    const targetHandle =
+      session?.sourceType === 'audius' && session.audiusHandle
+        ? session.audiusHandle
+        : currentHandle || DEFAULT_AUDIUS_HANDLE;
+
+    void loadAudiusTracks(targetHandle, {
+      autoPlay: session ? session.wasPlaying !== false : true,
+      isInitial: true,
+      restore,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Retry online restore when connection returns if initial startup happened offline
+  useEffect(() => {
+    if (
+      isOnline &&
+      playlist.length === 0 &&
+      !isLoadingTracks &&
+      !pendingFolderRestore &&
+      !initialRestoreConsumedRef.current
+    ) {
+      const session = initialSessionRef.current;
+      const restore: RestoreOptions | undefined = session
+        ? {
+            trackId: session.trackId,
+            trackTitle: session.trackTitle,
+            trackIndex: session.trackIndex,
+            time: session.currentTime,
+          }
+        : undefined;
+
+      if (session?.sourceType === 'url' && session.url) {
+        void handleLoadUrlSource(session.url, {
+          isInitial: true,
+          autoPlay: session.wasPlaying !== false,
+          restore,
+        });
+      } else if (!session || session.sourceType === 'audius') {
+        const targetHandle = session?.audiusHandle || currentHandle || DEFAULT_AUDIUS_HANDLE;
+        void loadAudiusTracks(targetHandle, {
+          autoPlay: false,
+          isInitial: true,
+          restore,
+        });
+      }
+    }
+  }, [
+    currentHandle,
+    handleLoadUrlSource,
+    isLoadingTracks,
+    isOnline,
+    loadAudiusTracks,
+    pendingFolderRestore,
+    playlist.length,
+  ]);
 
   const handleConfirmDelete = useCallback(
     (target: ConfirmDeleteTarget) => {
@@ -829,6 +1524,8 @@ export default function App() {
     async (index: number, autoPlay = true) => {
       if (index < 0 || index >= playlist.length) return;
       const track = playlist[index];
+      pendingSeekRef.current = null;
+      currentIndexRef.current = index;
       setCurrentIndex(index);
       setCurrentTime(0);
       setDuration(track.durationHint ?? 0);
@@ -846,14 +1543,32 @@ export default function App() {
       if (!audioEl) return;
       audioEl.src = track.src;
 
+      let started = false;
       if (autoPlay) {
-        const started = await startPlaybackSafe(true);
+        started = await startPlaybackSafe(true);
         if (!started) {
           showToast(t.pressPlayToast, 'info');
         }
       }
+
+      persistCurrentSession({
+        trackId: track.id,
+        trackTitle: track.title,
+        trackArtist: track.artist,
+        trackIndex: index,
+        currentTime: 0,
+        wasPlaying: started,
+      });
     },
-    [autoVisualPerTrack, playlist, randomizeVisual, showToast, startPlaybackSafe, t]
+    [
+      autoVisualPerTrack,
+      persistCurrentSession,
+      playlist,
+      randomizeVisual,
+      showToast,
+      startPlaybackSafe,
+      t,
+    ]
   );
 
   const togglePlay = useCallback(async () => {
@@ -870,6 +1585,10 @@ export default function App() {
     if (isPlaying) {
       audioEl.pause();
       setIsPlaying(false);
+      persistCurrentSession({
+        currentTime: audioEl.currentTime,
+        wasPlaying: false,
+      });
       trackEvent('audio_pause', {
         track_title: currentTrack?.title,
         artist: currentTrack?.artist,
@@ -880,6 +1599,10 @@ export default function App() {
       }
       const started = await startPlaybackSafe(true);
       if (started) {
+        persistCurrentSession({
+          currentTime: audioEl.currentTime,
+          wasPlaying: true,
+        });
         trackEvent('audio_play', {
           track_title: currentTrack?.title,
           artist: currentTrack?.artist,
@@ -888,7 +1611,17 @@ export default function App() {
         showToast(t.streamFailedToast, 'error');
       }
     }
-  }, [currentTrack, ensureAudioGraph, handleTriggerDemo, isPlaying, playlist.length, showToast, startPlaybackSafe, t]);
+  }, [
+    currentTrack,
+    ensureAudioGraph,
+    handleTriggerDemo,
+    isPlaying,
+    persistCurrentSession,
+    playlist.length,
+    showToast,
+    startPlaybackSafe,
+    t,
+  ]);
 
   const nextTrack = useCallback(
     (forceAutoPlay?: boolean) => {
@@ -932,9 +1665,11 @@ export default function App() {
   const handleSeek = (clientX: number, rect: DOMRect) => {
     const audioEl = audioRef.current;
     if (!audioEl || !Number.isFinite(audioEl.duration) || audioEl.duration <= 0) return;
+    pendingSeekRef.current = null;
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     audioEl.currentTime = ratio * audioEl.duration;
     setCurrentTime(audioEl.currentTime);
+    persistCurrentSession({ currentTime: audioEl.currentTime });
     trackEvent('audio_seek', { progress_pct: Math.round(ratio * 100) });
   };
 
@@ -945,7 +1680,8 @@ export default function App() {
       isEqOpen ||
       isMobileMenuOpen ||
       isMobilePlaylistOpen ||
-      isInstallGuideOpen;
+      isInstallGuideOpen ||
+      isInstallPromoOpen;
 
     if (!isPlaying || !uiVisible || anyModalOpen) {
       return;
@@ -992,6 +1728,7 @@ export default function App() {
   }, [
     isEqOpen,
     isInstallGuideOpen,
+    isInstallPromoOpen,
     isMobileMenuOpen,
     isMobilePlaylistOpen,
     isPlaying,
@@ -999,13 +1736,74 @@ export default function App() {
     uiVisible,
   ]);
 
+  // Show mystical install promo modal once on first launch when not already installed
+  useEffect(() => {
+    if (isInstalled || isStandaloneDisplay) {
+      setIsInstallPromoOpen(false);
+      return;
+    }
+    let alreadySeen = false;
+    try {
+      alreadySeen = localStorage.getItem(STORAGE_INSTALL_PROMO_KEY) === 'true';
+    } catch {
+      alreadySeen = false;
+    }
+    if (alreadySeen) return;
+
+    const timerId = window.setTimeout(() => {
+      setIsInstallPromoOpen(true);
+      trackEvent('pwa_promo_shown');
+    }, 700);
+    return () => window.clearTimeout(timerId);
+  }, [isInstalled, isStandaloneDisplay]);
+
+  const dismissInstallPromo = useCallback(() => {
+    setIsInstallPromoOpen(false);
+    try {
+      localStorage.setItem(STORAGE_INSTALL_PROMO_KEY, 'true');
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const progressPercent = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
-  const openSources = (tab: SourceTab) => {
+  const openSources = useCallback((tab: SourceTab) => {
     setSourcesTab(tab);
     setIsSourcesOpen(true);
     trackEvent('modal_open', { modal: 'sources', tab });
-  };
+  }, []);
+
+  const handleResumePendingFolder = useCallback(async () => {
+    if (!pendingFolderRestore) return;
+    const { folderId, folderName, trackId, trackTitle, trackIndex, currentTime: savedTime } =
+      pendingFolderRestore;
+    try {
+      const dirHandle = await getDirectoryHandle(folderId);
+      if (dirHandle) {
+        const files = await readAudioFilesFromDirectoryHandle(dirHandle);
+        if (files.length > 0) {
+          await loadParsedAudioFiles(files, folderId, folderName, {
+            saveHandle: dirHandle,
+            restore: {
+              trackId,
+              trackTitle,
+              trackIndex,
+              time: savedTime,
+            },
+            closeModal: true,
+            autoPlay: true,
+            toastType: 'opened',
+          });
+          return;
+        }
+      }
+    } catch {
+      // fallback to manual folder re-selection modal below
+    }
+    openSources('folder');
+    showToast(t.reselectFolderToast(folderName), 'info');
+  }, [loadParsedAudioFiles, openSources, pendingFolderRestore, showToast, t]);
 
   const handleInstallApp = useCallback(async () => {
     if (isInstalled) {
@@ -1037,7 +1835,8 @@ export default function App() {
       isEqOpen ||
       isMobileMenuOpen ||
       isMobilePlaylistOpen ||
-      isInstallGuideOpen
+      isInstallGuideOpen ||
+      isInstallPromoOpen
     ) {
       return;
     }
@@ -1073,7 +1872,7 @@ export default function App() {
       />
 
       {/* ZEN MODE: FLOATING CIRCULAR TRACK ORBS (2-5 ORBS) */}
-      {!uiVisible && (
+      {!uiVisible && showOrbs && (
         <FloatingTrackOrbs
           tracks={playlist}
           currentIndex={currentIndex}
@@ -1173,6 +1972,21 @@ export default function App() {
         {/* DESKTOP + MENU CONTROLS */}
         <div className="flex items-center gap-2">
           <div className="hidden lg:flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleOrbs}
+              title={t.orbsBtnTitle}
+              aria-pressed={showOrbs}
+              className={`px-3.5 py-2 text-xs font-semibold rounded-lg border transition flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+                showOrbs
+                  ? 'bg-emerald-600/25 text-emerald-200 border-emerald-400/50 shadow-sm shadow-emerald-950/40'
+                  : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              <Disc3 className="w-3.5 h-3.5" />
+              <span>{t.orbsBtn}</span>
+            </button>
+
             <button
               type="button"
               onClick={toggleOrbCaptions}
@@ -1329,10 +2143,15 @@ export default function App() {
             <div className="absolute bottom-4 left-4 right-4">
               <div className="text-[11px] font-medium text-purple-300 mb-1 truncate">
                 {currentTrack?.sourceName ||
-                  (!isOnline ? t.offlineCoverSubtitle : `Audius: @${currentHandle}`)}
+                  (pendingFolderRestore
+                    ? `${t.folderPrefix}: ${pendingFolderRestore.folderName}`
+                    : !isOnline
+                    ? t.offlineCoverSubtitle
+                    : `Audius: @${currentHandle}`)}
               </div>
               <h2 className="text-lg sm:text-xl font-bold text-white truncate">
                 {currentTrack?.title ||
+                  pendingFolderRestore?.trackTitle ||
                   (isLoadingTracks
                     ? t.loadingRitmXoid
                     : !isOnline
@@ -1340,14 +2159,28 @@ export default function App() {
                     : t.chooseTrack)}
               </h2>
               <p className="text-xs sm:text-sm text-gray-300 truncate">
-                {currentTrack?.artist || 'YRitmX Audio Engine'}
+                {currentTrack?.artist ||
+                  pendingFolderRestore?.trackArtist ||
+                  'YRitmX Audio Engine'}
               </p>
             </div>
           </button>
 
+          {pendingFolderRestore && !currentTrack && uiVisible && (
+            <button
+              type="button"
+              onClick={() => void handleResumePendingFolder()}
+              className="mt-3 px-4 py-2 rounded-xl bg-purple-600/30 hover:bg-purple-600/45 border border-purple-400/50 text-xs font-semibold text-purple-100 shadow-lg shadow-purple-950/40 transition flex items-center gap-2 cursor-pointer"
+            >
+              <FolderOpen className="w-3.5 h-3.5 shrink-0" />
+              <span>{t.resumeFolderBtn(pendingFolderRestore.folderName)}</span>
+            </button>
+          )}
+
           {awaitingAutoplayUnlock && currentTrack && !isPlaying && uiVisible && (
             <button
               type="button"
+              data-play-toggle="true"
               onClick={() => void togglePlay()}
               className="mt-3 px-4 py-1.5 rounded-xl bg-purple-600/25 hover:bg-purple-600/40 border border-purple-500/40 text-xs font-semibold text-purple-200 transition flex items-center gap-1.5 cursor-pointer"
             >
@@ -1526,9 +2359,15 @@ export default function App() {
                 const audioEl = audioRef.current;
                 if (!audioEl || !duration) return;
                 if (e.key === 'ArrowRight') {
+                  pendingSeekRef.current = null;
                   audioEl.currentTime = Math.min(duration, audioEl.currentTime + 5);
+                  setCurrentTime(audioEl.currentTime);
+                  persistCurrentSession({ currentTime: audioEl.currentTime });
                 } else if (e.key === 'ArrowLeft') {
+                  pendingSeekRef.current = null;
                   audioEl.currentTime = Math.max(0, audioEl.currentTime - 5);
+                  setCurrentTime(audioEl.currentTime);
+                  persistCurrentSession({ currentTime: audioEl.currentTime });
                 }
               }}
               className="flex-1 relative group cursor-pointer py-2 focus-visible:outline-none"
@@ -1602,6 +2441,7 @@ export default function App() {
 
               <button
                 type="button"
+                data-play-toggle="true"
                 onClick={() => void togglePlay()}
                 aria-label={isPlaying ? t.pauseLabel : t.playLabel}
                 className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-purple-900/50 hover:scale-105 transition cursor-pointer"
@@ -1688,11 +2528,34 @@ export default function App() {
           if (Number.isFinite(el.duration) && el.duration > 0) {
             setDuration(el.duration);
           }
+          const now = Date.now();
+          if (now - lastTimeFlushRef.current >= 2000) {
+            lastTimeFlushRef.current = now;
+            persistCurrentSession({ currentTime: el.currentTime });
+          }
         }}
         onLoadedMetadata={(e) => {
           const el = e.currentTarget;
           if (Number.isFinite(el.duration) && el.duration > 0) {
             setDuration(el.duration);
+          }
+          const pending = pendingSeekRef.current;
+          if (
+            pending &&
+            (el.src === pending.src || el.currentSrc === pending.src || !pending.src)
+          ) {
+            pendingSeekRef.current = null;
+            const maxTarget =
+              Number.isFinite(el.duration) && el.duration > 1 ? el.duration - 0.5 : pending.time;
+            const targetTime = Math.max(0, Math.min(pending.time, maxTarget));
+            if (targetTime > 0) {
+              try {
+                el.currentTime = targetTime;
+                setCurrentTime(targetTime);
+              } catch {
+                // ignore seek failures on non-seekable streams
+              }
+            }
           }
         }}
         onEnded={() => {
@@ -1709,6 +2572,7 @@ export default function App() {
         }}
         onError={() => {
           if (playlist.length === 0) return;
+          pendingSeekRef.current = null;
           setIsPlaying(false);
           trackEvent('stream_error', { track_title: currentTrack?.title });
           showToast(t.streamErrorToast, 'error');
@@ -1731,6 +2595,7 @@ export default function App() {
         activeFolderId={activeFolderId}
         isParsingFiles={isParsingFiles}
         onSelectFolderInputFiles={(files) => void handleSelectFolderInputFiles(files)}
+        onSelectDirectoryPicker={() => void handleSelectDirectoryPicker()}
         onSelectSavedFolder={(folder) => void handleSelectSavedFolder(folder)}
         savedUrls={savedUrls}
         activeUrlId={activeUrlId}
@@ -1759,6 +2624,7 @@ export default function App() {
         paletteIndex={paletteIndex}
         autoVisualPerTrack={autoVisualPerTrack}
         mixEnabled={mixEnabled}
+        showOrbs={showOrbs}
         showOrbCaptions={showOrbCaptions}
         isAppInstalled={isInstalled}
         isFullscreen={isNativeFullscreen}
@@ -1784,8 +2650,8 @@ export default function App() {
           })
         }
         onToggleMix={toggleMixEnabled}
+        onToggleOrbs={toggleOrbs}
         onToggleOrbCaptions={toggleOrbCaptions}
-        onRandomizeVisual={() => randomizeVisual()}
         onOpenSources={(tab) => openSources(tab)}
         onOpenEqualizer={() => {
           setIsEqOpen(true);
@@ -1803,6 +2669,15 @@ export default function App() {
         isOpen={isInstallGuideOpen}
         isIOS={isIOS}
         onClose={() => setIsInstallGuideOpen(false)}
+      />
+
+      <FirstLaunchInstallModal
+        isOpen={isInstallPromoOpen && !isInstalled && !isStandaloneDisplay}
+        onInstall={() => {
+          dismissInstallPromo();
+          void handleInstallApp();
+        }}
+        onDismiss={dismissInstallPromo}
       />
 
       <MobilePlaylistModal

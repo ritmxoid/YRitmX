@@ -167,7 +167,9 @@ export function FloatingTrackOrbs({
     const companionCount = Math.min(others.length, 1 + Math.floor(Math.random() * 4));
     const selectedCompanions = others.slice(0, companionCount);
 
-    const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+    const isMobile =
+      typeof window !== 'undefined' &&
+      (window.innerWidth < 768 || Math.min(window.innerWidth, window.innerHeight) < 560);
     const activeSize = isMobile ? 96 : 116;
 
     const trackStyle = pickTrackOrbStyle();
@@ -312,7 +314,8 @@ export function FloatingTrackOrbs({
     let smoothBass = 0.08;
     let smoothHigh = 0.07;
     let prevBass = 0.08;
-    let smoothTempo = 0.275;
+    const initialSpeedScale = width < 768 || Math.min(width, height) < 560 ? 0.5 : 1;
+    let smoothTempo = 0.275 * initialSpeedScale;
     let songHue = Math.random() * 360;
     let animId = 0;
     let frameCounter = 0;
@@ -363,14 +366,19 @@ export function FloatingTrackOrbs({
       const energyNorm = Math.max(0, Math.min(1, (smoothEnergy - 0.11) / 0.48));
       const intenseBoost = Math.pow(energyNorm, 1.7);
 
-      // Smooth, 2x gentler flight speed across the entire spectrum
+      // Mobile screens get an additional 2x speed reduction across the entire spectrum
+      const mobileSpeedScale = width < 768 || Math.min(width, height) < 560 ? 0.5 : 1;
+
+      // Smooth, gentler flight speed across the entire spectrum
       const targetTempo =
         (playing
           ? 0.72 +
             Math.pow(smoothEnergy, 1.35) * 1.25 +
             intenseBoost * 1.75 +
             beatKick * (0.28 + intenseBoost * 0.95)
-          : 0.48) * 0.5;
+          : 0.48) *
+        0.5 *
+        mobileSpeedScale;
       smoothTempo += (targetTempo - smoothTempo) * (0.06 + intenseBoost * 0.06);
 
       const effectIntensity = playing ? 0.24 + smoothEnergy * 0.9 + intenseBoost * 0.45 : 0.22;
@@ -390,7 +398,8 @@ export function FloatingTrackOrbs({
           smoothEnergy * 0.022 +
           intenseBoost * 0.02;
 
-        const wander = (0.01 + smoothEnergy * 0.018 + intenseBoost * 0.036) * 0.5;
+        const wander =
+          (0.01 + smoothEnergy * 0.018 + intenseBoost * 0.036) * 0.5 * mobileSpeedScale;
         p.vx += Math.sin(p.phase * 0.78 + i * 2.1) * wander;
         p.vy += Math.cos(p.phase * 0.92 + i * 1.7) * wander;
 

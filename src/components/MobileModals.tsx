@@ -1,6 +1,7 @@
 import {
   CheckCircle2,
   Cloud,
+  Disc3,
   Download,
   Eye,
   FolderOpen,
@@ -9,7 +10,6 @@ import {
   ListMusic,
   Maximize2,
   Minimize2,
-  RefreshCw,
   Share,
   Sliders,
   Smartphone,
@@ -29,6 +29,7 @@ interface MobileMenuModalProps {
   paletteIndex: number;
   autoVisualPerTrack: boolean;
   mixEnabled: boolean;
+  showOrbs: boolean;
   showOrbCaptions: boolean;
   isAppInstalled: boolean;
   isFullscreen: boolean;
@@ -36,8 +37,8 @@ interface MobileMenuModalProps {
   onChangePalette: (val: number) => void;
   onToggleAutoVisual: () => void;
   onToggleMix: () => void;
+  onToggleOrbs: () => void;
   onToggleOrbCaptions: () => void;
-  onRandomizeVisual: () => void;
   onOpenSources: (tab: SourceTab) => void;
   onOpenEqualizer: () => void;
   onToggleUI: () => void;
@@ -52,6 +53,7 @@ export function MobileMenuModal({
   paletteIndex,
   autoVisualPerTrack,
   mixEnabled,
+  showOrbs,
   showOrbCaptions,
   isAppInstalled,
   isFullscreen,
@@ -59,8 +61,8 @@ export function MobileMenuModal({
   onChangePalette,
   onToggleAutoVisual,
   onToggleMix,
+  onToggleOrbs,
   onToggleOrbCaptions,
-  onRandomizeVisual,
   onOpenSources,
   onOpenEqualizer,
   onToggleUI,
@@ -138,61 +140,69 @@ export function MobileMenuModal({
           <div className="grid grid-cols-3 gap-2 pt-1">
             <button
               type="button"
-              onClick={onRandomizeVisual}
-              className="py-2.5 px-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer"
+              onClick={() => {
+                onClose();
+                onOpenEqualizer();
+              }}
+              className="py-2.5 px-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer min-w-0"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>{t.shortLook}</span>
+              <Sliders className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+              <span className="truncate">{t.eqLabel}</span>
             </button>
             <button
               type="button"
               onClick={onToggleMix}
-              className={`py-2.5 px-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer ${
+              className={`py-2.5 px-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer min-w-0 ${
                 mixEnabled
                   ? 'bg-sky-600/25 border-sky-500/40 text-sky-200'
                   : 'bg-white/5 border-white/10 text-gray-300'
               }`}
             >
-              <Layers className="w-3.5 h-3.5" />
-              <span>{t.shortMix}</span>
+              <Layers className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{t.shortMix}</span>
             </button>
             <button
               type="button"
               onClick={onToggleAutoVisual}
-              className={`py-2.5 px-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer ${
+              className={`py-2.5 px-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer min-w-0 ${
                 autoVisualPerTrack
                   ? 'bg-purple-600/25 border-purple-500/40 text-purple-200'
                   : 'bg-white/5 border-white/10 text-gray-300'
               }`}
             >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>{t.shortAuto}</span>
+              <Sparkles className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{t.shortAuto}</span>
             </button>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => {
-                onClose();
-                onOpenEqualizer();
-              }}
-              className="py-2.5 px-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+              onClick={onToggleOrbs}
+              title={t.orbsBtnTitle}
+              aria-pressed={showOrbs}
+              className={`py-2.5 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                showOrbs
+                  ? 'bg-emerald-600/25 border-emerald-400/45 text-emerald-200'
+                  : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'
+              }`}
             >
-              <Sliders className="w-3.5 h-3.5 text-purple-400" />
-              <span>{t.eqLabel}</span>
+              <Disc3 className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{t.orbsBtn}</span>
             </button>
             <button
               type="button"
               onClick={onToggleOrbCaptions}
+              title={t.captionBtnTitle}
+              aria-pressed={showOrbCaptions}
               className={`py-2.5 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition ${
                 showOrbCaptions
                   ? 'bg-fuchsia-600/25 border-fuchsia-400/45 text-fuchsia-200'
                   : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'
               }`}
             >
-              <Type className="w-3.5 h-3.5" />
-              <span>{t.captionBtn}</span>
+              <Type className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">{t.captionBtn}</span>
             </button>
           </div>
 
@@ -389,6 +399,98 @@ export function PWAInstallGuideModal({
         >
           {t.gotItBtn}
         </button>
+      </div>
+    </div>
+  );
+}
+
+interface FirstLaunchInstallModalProps {
+  isOpen: boolean;
+  onInstall: () => void;
+  onDismiss: () => void;
+}
+
+export function FirstLaunchInstallModal({
+  isOpen,
+  onInstall,
+  onDismiss,
+}: FirstLaunchInstallModalProps) {
+  const { t } = useI18n();
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[55] flex items-center justify-center bg-black/75 backdrop-blur-md p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="first-launch-install-text"
+      onClick={onDismiss}
+    >
+      <div className="relative w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+        {/* Mystical ambient aura */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -inset-4 rounded-[2rem] bg-gradient-to-tr from-purple-600/35 via-fuchsia-500/20 to-sky-500/35 blur-2xl animate-mystic-aura"
+        />
+
+        <div className="relative glass-modal rounded-3xl p-6 sm:p-7 border border-purple-400/35 animate-mystic-pulse overflow-hidden text-center">
+          {/* Shimmering diagonal sheen */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl"
+          >
+            <div className="w-1/2 h-full bg-gradient-to-r from-transparent via-white/15 to-transparent animate-mystic-shimmer" />
+          </div>
+
+          <button
+            type="button"
+            onClick={onDismiss}
+            aria-label={t.closeWindowLabel}
+            className="absolute top-3.5 right-3.5 z-10 p-2 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+
+          <div className="relative z-10 flex flex-col items-center">
+            <div className="w-14 h-14 mb-4 rounded-2xl bg-[#090D0B] border border-lime-400/30 ring-1 ring-purple-400/25 flex items-center justify-center shadow-lg shadow-purple-950/60 overflow-hidden">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 64 64"
+                fill="none"
+                aria-hidden="true"
+                className="w-full h-full"
+              >
+                <rect width="64" height="64" rx="16" fill="#090D0B" />
+                <rect x="13" y="22" width="7" height="22" rx="3.5" fill="#A3E635" />
+                <rect x="24" y="13" width="7" height="38" rx="3.5" fill="#84CC16" />
+                <rect x="35" y="19" width="7" height="26" rx="3.5" fill="#BEF264" />
+                <rect x="46" y="27" width="7" height="16" rx="3.5" fill="#4D7C0F" />
+                <circle cx="49.5" cy="18.5" r="3.5" fill="#A3E635" />
+              </svg>
+            </div>
+
+            <div className="text-[11px] font-semibold tracking-[0.22em] uppercase text-purple-300/90 mb-2">
+              YRitmX
+            </div>
+
+            <p
+              id="first-launch-install-text"
+              className="text-sm sm:text-base font-medium text-gray-100 leading-relaxed mb-6"
+            >
+              {t.installPromoText}
+            </p>
+
+            <button
+              type="button"
+              onClick={onInstall}
+              className="w-full py-3 px-5 rounded-2xl bg-gradient-to-r from-purple-600 via-fuchsia-600 to-sky-500 hover:from-purple-500 hover:via-fuchsia-500 hover:to-sky-400 text-white text-sm font-semibold shadow-lg shadow-purple-900/50 border border-white/20 flex items-center justify-center gap-2 transition hover:scale-[1.02] active:scale-[0.99] cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              <span>{t.installBtn}</span>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

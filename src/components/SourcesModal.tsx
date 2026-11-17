@@ -34,6 +34,7 @@ interface SourcesModalProps {
   savedFolders: SavedFolderEntry[];
   activeFolderId: string | null;
   isParsingFiles: boolean;
+  onSelectDirectoryPicker?: () => void;
   onSelectFolderInputFiles: (files: FileList | null) => void;
   onSelectSavedFolder: (folder: SavedFolderEntry) => void;
 
@@ -60,6 +61,7 @@ export function SourcesModal({
   savedFolders,
   activeFolderId,
   isParsingFiles,
+  onSelectDirectoryPicker,
   onSelectFolderInputFiles,
   onSelectSavedFolder,
   savedUrls,
@@ -106,6 +108,12 @@ export function SourcesModal({
     el.setAttribute('webkitdirectory', '');
     el.setAttribute('directory', '');
   };
+
+  const canUseDirectoryPicker =
+    typeof window !== 'undefined' &&
+    'showDirectoryPicker' in window &&
+    window.self === window.top &&
+    Boolean(onSelectDirectoryPicker);
 
   return (
     <div
@@ -277,23 +285,39 @@ export function SourcesModal({
             <p className="text-xs text-gray-400 leading-relaxed">{t.folderHint}</p>
 
             <div className="space-y-2.5">
-              <label className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-sm font-semibold rounded-xl cursor-pointer shadow-lg shadow-purple-900/40 transition">
-                {isParsingFiles ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <FolderOpen className="w-4 h-4" />
-                )}
-                <span>{isParsingFiles ? t.scanningFiles : t.pickFolderBtn}</span>
-                <input
-                  ref={setFolderAttributes}
-                  type="file"
-                  multiple
-                  accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac"
-                  onChange={handleFileInputChange}
+              {canUseDirectoryPicker ? (
+                <button
+                  type="button"
+                  onClick={onSelectDirectoryPicker}
                   disabled={isParsingFiles}
-                  className="hidden"
-                />
-              </label>
+                  className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-60 text-white text-sm font-semibold rounded-xl cursor-pointer shadow-lg shadow-purple-900/40 transition"
+                >
+                  {isParsingFiles ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <FolderOpen className="w-4 h-4" />
+                  )}
+                  <span>{isParsingFiles ? t.scanningFiles : t.pickFolderBtn}</span>
+                </button>
+              ) : (
+                <label className="flex items-center justify-center gap-2 w-full py-3 px-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-sm font-semibold rounded-xl cursor-pointer shadow-lg shadow-purple-900/40 transition">
+                  {isParsingFiles ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <FolderOpen className="w-4 h-4" />
+                  )}
+                  <span>{isParsingFiles ? t.scanningFiles : t.pickFolderBtn}</span>
+                  <input
+                    ref={setFolderAttributes}
+                    type="file"
+                    multiple
+                    accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac"
+                    onChange={handleFileInputChange}
+                    disabled={isParsingFiles}
+                    className="hidden"
+                  />
+                </label>
+              )}
 
               <label className="flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-xs font-semibold rounded-xl cursor-pointer transition">
                 <FileAudio className="w-4 h-4 text-purple-300" />
