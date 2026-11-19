@@ -1,8 +1,9 @@
-import { createContext, ReactNode, useContext, useEffect, useMemo } from 'react';
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { trackEvent } from '../utils/analytics';
 import {
-  detectBrowserLanguage,
+  getInitialLanguage,
   getTranslations,
+  setActiveLanguage,
   SupportedLang,
   Translations,
 } from './translations';
@@ -10,19 +11,29 @@ import {
 interface I18nContextValue {
   lang: SupportedLang;
   t: Translations;
+  setLang: (lang: SupportedLang) => void;
 }
 
-const initialLang = detectBrowserLanguage();
+const initialLang = getInitialLanguage();
 const I18nContext = createContext<I18nContextValue>({
   lang: initialLang,
   t: getTranslations(initialLang),
+  setLang: () => {},
 });
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const value = useMemo(() => {
-    const lang = detectBrowserLanguage();
-    return { lang, t: getTranslations(lang) };
+  const [lang, setLangState] = useState<SupportedLang>(() => getInitialLanguage());
+
+  const setLang = useCallback((nextLang: SupportedLang) => {
+    setActiveLanguage(nextLang);
+    setLangState(nextLang);
+    trackEvent('app_language_switch', { lang: nextLang });
   }, []);
+
+  const value = useMemo(
+    () => ({ lang, t: getTranslations(lang), setLang }),
+    [lang, setLang]
+  );
 
   useEffect(() => {
     document.documentElement.lang = value.lang;

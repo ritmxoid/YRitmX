@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Cloud,
@@ -28,6 +29,7 @@ import {
 import { useI18n } from '../i18n/I18nContext';
 import { getHelpMessages } from '../i18n/helpMessages';
 import { getStudioMessages } from '../i18n/studioMessages';
+import { SUPPORTED_LANGUAGES } from '../i18n/translations';
 import { SourceTab, Track } from '../types/audio';
 import { PlaylistItems } from './PlaylistItems';
 
@@ -90,11 +92,33 @@ export function MobileMenuModal({
   onToggleFullscreen,
   onInstallApp,
 }: MobileMenuModalProps) {
-  const { t, lang } = useI18n();
+  const { t, lang, setLang } = useI18n();
   const studioT = getStudioMessages(lang);
   const helpT = getHelpMessages(lang);
+  const [isLangOpen, setIsLangOpen] = useState(false);
+  const langMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setIsLangOpen(false);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isLangOpen) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      if (langMenuRef.current && !langMenuRef.current.contains(e.target as Node)) {
+        setIsLangOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [isLangOpen]);
 
   if (!isOpen) return null;
+
+  const currentLangOption =
+    SUPPORTED_LANGUAGES.find((item) => item.code === lang) ?? SUPPORTED_LANGUAGES[0];
 
   return (
     <div
@@ -108,19 +132,74 @@ export function MobileMenuModal({
         className="glass-modal w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 sm:p-6 border-t sm:border border-white/10 max-h-[88vh] overflow-y-auto hide-scrollbar"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-4">
-          <h3 className="font-bold text-base flex items-center gap-2 text-white">
-            <Sliders className="w-4 h-4 text-purple-400" />
-            <span>{t.menuHeader}</span>
+        <div className="flex items-center justify-between gap-2 pb-4 border-b border-white/10 mb-4">
+          <h3 className="font-bold text-base flex items-center gap-2 text-white min-w-0">
+            <Sliders className="w-4 h-4 text-purple-400 shrink-0" />
+            <span className="truncate">{t.menuHeader}</span>
           </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t.closeMenuLabel}
-            className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <div ref={langMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setIsLangOpen((prev) => !prev)}
+                aria-expanded={isLangOpen}
+                aria-haspopup="listbox"
+                aria-label={currentLangOption.label}
+                title={currentLangOption.label}
+                className={`h-8 px-2.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                  isLangOpen
+                    ? 'bg-purple-600/30 border-purple-400/50 text-white'
+                    : 'bg-white/5 border-white/10 text-gray-200 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                {currentLangOption.short}
+              </button>
+
+              {isLangOpen && (
+                <div
+                  role="listbox"
+                  aria-label={currentLangOption.label}
+                  className="absolute end-0 top-full mt-1.5 z-50 w-56 p-1.5 rounded-2xl bg-[#101018]/95 backdrop-blur-xl border border-white/15 shadow-2xl grid grid-cols-3 gap-1"
+                >
+                  {SUPPORTED_LANGUAGES.map((item) => {
+                    const active = item.code === lang;
+                    return (
+                      <button
+                        key={item.code}
+                        type="button"
+                        role="option"
+                        aria-selected={active}
+                        onClick={() => {
+                          setLang(item.code);
+                          setIsLangOpen(false);
+                        }}
+                        title={item.label}
+                        className={`px-2 py-1.5 rounded-lg text-left transition cursor-pointer flex flex-col ${
+                          active
+                            ? 'bg-purple-600/35 text-white border border-purple-400/50'
+                            : 'text-gray-300 hover:text-white hover:bg-white/10 border border-transparent'
+                        }`}
+                      >
+                        <span className="text-xs font-bold leading-tight">{item.short}</span>
+                        <span className="text-[9px] text-gray-400 truncate leading-tight">
+                          {item.label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={t.closeMenuLabel}
+              className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <div className="space-y-4">

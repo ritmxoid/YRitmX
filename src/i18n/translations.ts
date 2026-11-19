@@ -4466,6 +4466,49 @@ const LANG_ALIASES: Record<string, SupportedLang> = {
   in: 'hi',
 };
 
+export interface LangOption {
+  code: SupportedLang;
+  short: string;
+  label: string;
+}
+
+export const SUPPORTED_LANGUAGES: LangOption[] = [
+  { code: 'en', short: 'En', label: 'English' },
+  { code: 'ru', short: 'Ru', label: 'Русский' },
+  { code: 'uk', short: 'Uk', label: 'Українська' },
+  { code: 'de', short: 'De', label: 'Deutsch' },
+  { code: 'fr', short: 'Fr', label: 'Français' },
+  { code: 'es', short: 'Es', label: 'Español' },
+  { code: 'it', short: 'It', label: 'Italiano' },
+  { code: 'pt', short: 'Pt', label: 'Português' },
+  { code: 'pl', short: 'Pl', label: 'Polski' },
+  { code: 'tr', short: 'Tr', label: 'Türkçe' },
+  { code: 'uz', short: 'Uz', label: 'Oʻzbek' },
+  { code: 'kk', short: 'Kk', label: 'Қазақша' },
+  { code: 'zh', short: 'Zh', label: '中文' },
+  { code: 'ja', short: 'Ja', label: '日本語' },
+  { code: 'ko', short: 'Ko', label: '한국어' },
+  { code: 'ar', short: 'Ar', label: 'العربية' },
+  { code: 'hi', short: 'Hi', label: 'हिन्दी' },
+];
+
+const STORAGE_LANG_KEY = 'yritmx_lang';
+
+function readStoredLanguage(): SupportedLang | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const saved = window.localStorage.getItem(STORAGE_LANG_KEY);
+    if (saved && saved in TRANSLATIONS) {
+      return saved as SupportedLang;
+    }
+  } catch {
+    // ignore storage restrictions
+  }
+  return null;
+}
+
+let activeLangOverride: SupportedLang | null = readStoredLanguage();
+
 export function detectBrowserLanguage(): SupportedLang {
   if (typeof navigator === 'undefined') return 'en';
   const candidates =
@@ -4485,7 +4528,22 @@ export function detectBrowserLanguage(): SupportedLang {
   return 'en';
 }
 
+export function getInitialLanguage(): SupportedLang {
+  return activeLangOverride ?? readStoredLanguage() ?? detectBrowserLanguage();
+}
+
+export function setActiveLanguage(lang: SupportedLang): void {
+  activeLangOverride = lang;
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(STORAGE_LANG_KEY, lang);
+    } catch {
+      // ignore storage restrictions
+    }
+  }
+}
+
 export function getTranslations(lang?: SupportedLang): Translations {
-  const active = lang ?? detectBrowserLanguage();
+  const active = lang ?? activeLangOverride ?? getInitialLanguage();
   return TRANSLATIONS[active] ?? en;
 }
