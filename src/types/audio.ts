@@ -25,6 +25,13 @@ export interface CustomStageMedia {
   soundVolume: number;
 }
 
+export interface StageBgAudio {
+  src: string;
+  name: string;
+  volume: number;
+  enabled: boolean;
+}
+
 export interface Track {
   id: string;
   title: string;

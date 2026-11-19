@@ -27,6 +27,7 @@ import {
   FrameRotationTarget,
   RecordAspectRatio,
   RecordQualityPreset,
+  StageBgAudio,
   Track,
   VisualDNA,
 } from '../types/audio';
@@ -76,6 +77,7 @@ export interface OfflineExportOptions {
   isMuted: boolean;
   studioFrameSnapshot: StudioFrameState | null;
   customStageMedia?: CustomStageMedia | null;
+  stageAudio?: StageBgAudio | null;
   coverFrameMotion?: FrameMotionMode;
   coverRotationTarget?: FrameRotationTarget;
   showCoverCaption?: boolean;
@@ -567,6 +569,7 @@ export async function exportStudioVideoOffline(
     isMuted,
     studioFrameSnapshot,
     customStageMedia = null,
+    stageAudio = null,
     coverFrameMotion = 'static',
     coverRotationTarget = 'none',
     showCoverCaption = false,
@@ -623,13 +626,12 @@ export async function exportStudioVideoOffline(
   let customVideoSource: VideoFrameSource | null = null;
   let customImageEl: HTMLImageElement | null = null;
   let customOverlayAudio: AudioBuffer | null = null;
+  let stageBgAudioBuf: AudioBuffer | null = null;
   let output: Output<Mp4OutputFormat, BufferTarget> | null = null;
 
   const useCustomStageMedia =
     Boolean(customStageMedia) &&
-    customStageMedia?.kind !== 'camera' &&
-    activeTrack.mediaType !== 'video' &&
-    activeTrack.mediaType !== 'image';
+    customStageMedia?.kind !== 'camera';
 
   try {
     reportProgress(0, 'preparing', true);
@@ -736,13 +738,38 @@ export async function exportStudioVideoOffline(
       }
     }
 
+    if (stageAudio && stageAudio.enabled && stageAudio.volume > 0) {
+      throwIfAborted(signal);
+      const bgRes = await decodeAndApplyEqAudio(
+        stageAudio.src,
+        [0, 0, 0, 0, 0],
+        stageAudio.volume,
+        isMuted,
+        true
+      );
+      stageBgAudioBuf = bgRes.buffer;
+    }
+
     throwIfAborted(signal);
 
+    const totalDurationSec = Math.max(0.2, timelineCursor);
     let soundtrack = concatenateAudioSegments(audioSegments);
+    if (!soundtrack && (customOverlayAudio || stageBgAudioBuf)) {
+      const sampleRate =
+        stageBgAudioBuf?.sampleRate ?? customOverlayAudio?.sampleRate ?? 48000;
+      const frameCount = Math.max(1, Math.ceil(totalDurationSec * sampleRate));
+      soundtrack = new AudioBuffer({
+        length: frameCount,
+        numberOfChannels: 2,
+        sampleRate,
+      });
+    }
     if (soundtrack && customOverlayAudio) {
       soundtrack = mixLoopedOverlayAudio(soundtrack, customOverlayAudio);
     }
-    const totalDurationSec = Math.max(0.2, timelineCursor);
+    if (soundtrack && stageBgAudioBuf) {
+      soundtrack = mixLoopedOverlayAudio(soundtrack, stageBgAudioBuf);
+    }
     const totalFrames = Math.max(1, Math.round(totalDurationSec * fps));
     const exportDuration = totalFrames / fps;
     const fftSampler = soundtrack ? new OfflineAnalyserSampler(soundtrack, fps) : null;
@@ -855,32 +882,45 @@ export async function exportStudioVideoOffline(
         clips.find((c) => time >= c.startSec && time < c.endSec) ?? clips[clips.length - 1];
       const localTime = Math.max(0, time - activeClip.startSec);
 
-      let mediaSource: CanvasImageSource | null = activeClip.imageEl;
-      let mediaWidth = activeClip.imageEl?.naturalWidth ?? 0;
-      let mediaHeight = activeClip.imageEl?.naturalHeight ?? 0;
+      const isVideoClip = activeClip.track.mediaType === 'video';
+      const isImageClip = activeClip.track.mediaType === 'image';
+      const isMainMediaClip = isVideoClip || isImageClip;
+
+      let mediaSource: CanvasImageSource | null = isMainMediaClip ? null : activeClip.imageEl;
+      let mediaWidth = isMainMediaClip ? 0 : activeClip.imageEl?.naturalWidth ?? 0;
+      let mediaHeight = isMainMediaClip ? 0 : activeClip.imageEl?.naturalHeight ?? 0;
+
+      let backdropSource: CanvasImageSource | null = isImageClip ? activeClip.imageEl : null;
+      let backdropWidth = isImageClip ? activeClip.imageEl?.naturalWidth ?? 0 : 0;
+      let backdropHeight = isImageClip ? activeClip.imageEl?.naturalHeight ?? 0 : 0;
+      let skipFallbackCenterOrb = isMainMediaClip;
+      let frameStudioActive = isMainMediaClip
+        ? Boolean(useCustomStageMedia && customStageMedia)
+        : studioActive;
 
       if (activeClip.videoSource) {
         const vFrame = await activeClip.videoSource.frameAt(localTime);
         if (vFrame) {
-          mediaSource = vFrame;
+          let vw = 0;
+          let vh = 0;
           if (vFrame instanceof HTMLVideoElement) {
-            mediaWidth = vFrame.videoWidth;
-            mediaHeight = vFrame.videoHeight;
+            vw = vFrame.videoWidth;
+            vh = vFrame.videoHeight;
           } else if ('width' in vFrame && 'height' in vFrame) {
-            mediaWidth = Number((vFrame as { width: number }).width) || dims.logicalWidth;
-            mediaHeight = Number((vFrame as { height: number }).height) || dims.logicalHeight;
+            vw = Number((vFrame as { width: number }).width) || dims.logicalWidth;
+            vh = Number((vFrame as { height: number }).height) || dims.logicalHeight;
+          }
+          if (isMainMediaClip) {
+            backdropSource = vFrame;
+            backdropWidth = vw;
+            backdropHeight = vh;
+          } else {
+            mediaSource = vFrame;
+            mediaWidth = vw;
+            mediaHeight = vh;
           }
         }
       }
-
-      let backdropSource: CanvasImageSource | null = null;
-      let backdropWidth = 0;
-      let backdropHeight = 0;
-      let skipFallbackCenterOrb = false;
-      let frameStudioActive =
-        studioActive ||
-        activeClip.track.mediaType === 'video' ||
-        activeClip.track.mediaType === 'image';
 
       if (useCustomStageMedia && customStageMedia) {
         let customSrc: CanvasImageSource | null = customImageEl;
@@ -902,7 +942,7 @@ export async function exportStudioVideoOffline(
         }
 
         if (customSrc && customW > 0 && customH > 0) {
-          if (customStageMedia.displayMode === 'frame') {
+          if (isMainMediaClip || customStageMedia.displayMode === 'frame') {
             mediaSource = customSrc;
             mediaWidth = customW;
             mediaHeight = customH;
@@ -930,12 +970,15 @@ export async function exportStudioVideoOffline(
       }
 
       const isCustomFrameActive = Boolean(
-        useCustomStageMedia && customStageMedia?.displayMode === 'frame'
+        useCustomStageMedia &&
+          customStageMedia &&
+          (isMainMediaClip || customStageMedia.displayMode === 'frame')
       );
       const isCustomCleanBackdrop = Boolean(
-        useCustomStageMedia &&
-          customStageMedia?.displayMode === 'backdrop' &&
-          customStageMedia.backdropOverlay === 'clean'
+        isMainMediaClip ||
+          (useCustomStageMedia &&
+            customStageMedia?.displayMode === 'backdrop' &&
+            customStageMedia.backdropOverlay === 'clean')
       );
       const effectiveFrameMotion: FrameMotionMode = isCustomFrameActive
         ? customStageMedia!.frameMotion
@@ -947,8 +990,7 @@ export async function exportStudioVideoOffline(
         showCoverCaption &&
         !isCustomFrameActive &&
         !isCustomCleanBackdrop &&
-        activeClip.track.mediaType !== 'video' &&
-        activeClip.track.mediaType !== 'image';
+        !isMainMediaClip;
 
       renderCtx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
       stepAndRenderVisualizerFrame({
@@ -980,10 +1022,11 @@ export async function exportStudioVideoOffline(
         backdropSource,
         backdropWidth,
         backdropHeight,
-        backdropOverlay:
-          useCustomStageMedia && customStageMedia?.displayMode === 'backdrop'
-            ? customStageMedia.backdropOverlay
-            : undefined,
+        backdropOverlay: isMainMediaClip
+          ? 'clean'
+          : useCustomStageMedia && customStageMedia?.displayMode === 'backdrop'
+          ? customStageMedia.backdropOverlay
+          : undefined,
         skipFallbackCenterOrb,
         showStudioOverlay: false,
         orbSnapshots: orbsCopy,

@@ -32,11 +32,15 @@ import {
   CustomStageMedia,
   FrameMotionMode,
   FrameRotationTarget,
+  StageBgAudio,
 } from '../types/audio';
 
 interface StageMediaModalProps {
   isOpen: boolean;
+  isVideoTrack?: boolean;
+  isFullscreenTrack?: boolean;
   customMedia: CustomStageMedia | null;
+  stageAudio?: StageBgAudio | null;
   activeTrackTitle?: string;
   activeTrackArtist?: string;
   activeTrackCover?: string;
@@ -68,6 +72,9 @@ interface StageMediaModalProps {
   onChangeTrackVolume: (vol: number) => void;
   onToggleSound: () => void;
   onChangeSoundVolume: (vol: number) => void;
+  onToggleStageAudio?: () => void;
+  onChangeStageAudioVolume?: (vol: number) => void;
+  onRemoveStageAudio?: () => void;
   onChangeMicVolume: (vol: number) => void;
   onRemoveFileMedia: () => void;
   onClearMedia: () => void;
@@ -75,7 +82,10 @@ interface StageMediaModalProps {
 
 export function StageMediaModal({
   isOpen,
+  isVideoTrack = false,
+  isFullscreenTrack = false,
   customMedia,
+  stageAudio = null,
   activeTrackTitle,
   activeTrackArtist,
   activeTrackCover,
@@ -107,6 +117,9 @@ export function StageMediaModal({
   onChangeTrackVolume,
   onToggleSound,
   onChangeSoundVolume,
+  onToggleStageAudio,
+  onChangeStageAudioVolume,
+  onRemoveStageAudio,
   onChangeMicVolume,
   onRemoveFileMedia,
   onClearMedia,
@@ -116,15 +129,20 @@ export function StageMediaModal({
 
   if (!isOpen) return null;
 
+  const ownsFullscreenBackdrop = isVideoTrack || isFullscreenTrack;
   const isCameraActive = customMedia?.kind === 'camera' || cameraOverlayActive;
   const isFileActive = customMedia?.kind === 'image' || customMedia?.kind === 'video';
   const effectiveTrackVol = isTrackMuted ? 0 : trackVolume;
 
   const hasFrameActive = customMedia
-    ? Boolean(cameraOverlayActive || customMedia.displayMode === 'frame')
+    ? ownsFullscreenBackdrop
+      ? true
+      : Boolean(cameraOverlayActive || customMedia.displayMode === 'frame')
     : true;
   const hasBackdropActive = Boolean(
-    customMedia && (cameraOverlayActive || customMedia.displayMode === 'backdrop')
+    !ownsFullscreenBackdrop &&
+      customMedia &&
+      (cameraOverlayActive || customMedia.displayMode === 'backdrop')
   );
   const isFloating = customMedia
     ? customMedia.frameMotion === 'floating'
@@ -156,10 +174,14 @@ export function StageMediaModal({
       : studioT.customMediaBackdropWithAnim;
 
   const activeModeSummary = !customMedia
-    ? [frameLabel, rotationDetailLabel, showCoverCaption ? studioT.customMediaCaptionBtn : '']
+    ? [
+        frameLabel,
+        rotationDetailLabel,
+        !ownsFullscreenBackdrop && showCoverCaption ? studioT.customMediaCaptionBtn : '',
+      ]
         .filter(Boolean)
         .join(' · ')
-    : cameraOverlayActive
+    : cameraOverlayActive && !ownsFullscreenBackdrop
     ? `${studioT.customMediaModeBackdrop} (${backdropDetailLabel}) + ${studioT.customMediaTabCamera}`
     : hasBackdropActive
     ? `${studioT.customMediaModeBackdrop} · ${backdropDetailLabel}`
@@ -195,20 +217,22 @@ export function StageMediaModal({
           </button>
         </div>
 
-        {/* 3 source buttons in a row: Photo/Video | Camera | Microphone */}
+        {/* 3 source buttons in a row: Photo/Video (or Media) | Camera | Microphone */}
         <div className="grid grid-cols-3 gap-2">
           <button
             type="button"
-            aria-pressed={isFileActive}
+            aria-pressed={isFileActive || Boolean(ownsFullscreenBackdrop && stageAudio)}
             onClick={onTriggerPickFile}
             className={`min-h-[44px] py-2.5 px-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
-              isFileActive
+              isFileActive || (ownsFullscreenBackdrop && stageAudio)
                 ? 'bg-purple-600/30 border-purple-400/60 text-white shadow-sm shadow-purple-950/40'
                 : 'bg-white/5 border-white/15 text-gray-200 hover:bg-white/10 hover:text-white'
             }`}
           >
             <ImagePlus className="w-3.5 h-3.5 text-purple-300 shrink-0" />
-            <span className="truncate">{studioT.customMediaTabFile}</span>
+            <span className="truncate">
+              {ownsFullscreenBackdrop ? studioT.customMediaTabMedia : studioT.customMediaTabFile}
+            </span>
           </button>
 
           <button
@@ -244,21 +268,27 @@ export function StageMediaModal({
           </button>
         </div>
 
-        {!customMedia && !micEnabled && (
+        {!customMedia && !micEnabled && !stageAudio && (
           <p className="text-xs sm:text-sm text-gray-300 leading-relaxed">
             {studioT.customMediaEmptyHint}
           </p>
         )}
 
-        {/* Active track cover preview when no custom backdrop is loaded */}
+        {/* Active track preview when no custom overlay/backdrop is loaded */}
         {!customMedia && (
           <div className="flex items-center justify-between gap-2.5 p-3 rounded-2xl bg-white/5 border border-white/10">
             <div className="flex items-center gap-3 min-w-0">
-              <img
-                src={activeTrackCover || DEFAULT_COVER_IMAGE}
-                alt=""
-                className="w-10 h-10 rounded-xl object-cover border border-white/15 shrink-0 bg-black/40"
-              />
+              {isVideoTrack ? (
+                <div className="w-10 h-10 rounded-xl bg-sky-600/20 border border-sky-400/35 flex items-center justify-center text-sky-300 shrink-0">
+                  <Film className="w-4 h-4" />
+                </div>
+              ) : (
+                <img
+                  src={activeTrackCover || DEFAULT_COVER_IMAGE}
+                  alt=""
+                  className="w-10 h-10 rounded-xl object-cover border border-white/15 shrink-0 bg-black/40"
+                />
+              )}
               <div className="min-w-0">
                 <p className="text-xs sm:text-sm font-semibold text-white truncate">
                   {activeTrackTitle
@@ -270,7 +300,11 @@ export function StageMediaModal({
                 <p className="text-[11px] text-gray-400 truncate">{activeModeSummary}</p>
               </div>
             </div>
-            <Disc3 className="w-4 h-4 text-purple-300 shrink-0" />
+            {isVideoTrack ? (
+              <Film className="w-4 h-4 text-sky-300 shrink-0" />
+            ) : (
+              <Disc3 className="w-4 h-4 text-purple-300 shrink-0" />
+            )}
           </div>
         )}
 
@@ -379,13 +413,42 @@ export function StageMediaModal({
           </div>
         )}
 
+        {/* Active 3rd background audio track badge */}
+        {stageAudio && (
+          <div className="flex items-center justify-between gap-2.5 p-3 rounded-2xl bg-amber-500/10 border border-amber-400/25">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/35 flex items-center justify-center text-amber-300 shrink-0">
+                <Music className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs sm:text-sm font-semibold text-white truncate">
+                  {stageAudio.name}
+                </p>
+                <p className="text-[11px] text-amber-200/80 truncate">
+                  {studioT.customMediaBgAudioLabel}
+                </p>
+              </div>
+            </div>
+            {onRemoveStageAudio && (
+              <button
+                type="button"
+                onClick={onRemoveStageAudio}
+                aria-label={studioT.customMediaClearBtn}
+                className="p-1.5 rounded-lg bg-white/5 hover:bg-rose-500/20 text-gray-300 hover:text-rose-200 transition cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Primary 3 mode buttons + contextual sub-rows (also available for active track cover) */}
         <div className="space-y-2.5">
           <span className="text-xs font-medium text-gray-400 block">
             {studioT.customMediaModeLabel}
           </span>
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className={`grid gap-2 ${ownsFullscreenBackdrop ? 'grid-cols-2' : 'grid-cols-3'}`}>
             {/* 1. Static <-> Floating Frame Toggle */}
             <button
               type="button"
@@ -424,40 +487,41 @@ export function StageMediaModal({
               </span>
             </button>
 
-            {/* 3. Fullscreen (for custom media) OR Caption toggle (for active track cover) */}
-            {customMedia ? (
-              <button
-                type="button"
-                aria-pressed={hasBackdropActive}
-                onClick={onActivateBackdrop}
-                className={`min-h-[44px] py-2 px-2 rounded-xl border text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                  hasBackdropActive
-                    ? 'bg-sky-600/30 border-sky-400/60 text-white shadow-sm shadow-sky-950/40'
-                    : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                <Maximize className="w-3.5 h-3.5 shrink-0" />
-                <span className="leading-tight text-center">
-                  {studioT.customMediaModeBackdrop}
-                </span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                aria-pressed={showCoverCaption}
-                onClick={onToggleCoverCaption}
-                className={`min-h-[44px] py-2 px-2 rounded-xl border text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                  showCoverCaption
-                    ? 'bg-sky-600/30 border-sky-400/60 text-white shadow-sm shadow-sky-950/40'
-                    : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                <Type className="w-3.5 h-3.5 shrink-0" />
-                <span className="leading-tight text-center">
-                  {studioT.customMediaCaptionBtn}
-                </span>
-              </button>
-            )}
+            {/* 3. Fullscreen (for audio custom media) OR Caption toggle (for active track cover) */}
+            {!ownsFullscreenBackdrop &&
+              (customMedia ? (
+                <button
+                  type="button"
+                  aria-pressed={hasBackdropActive}
+                  onClick={onActivateBackdrop}
+                  className={`min-h-[44px] py-2 px-2 rounded-xl border text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                    hasBackdropActive
+                      ? 'bg-sky-600/30 border-sky-400/60 text-white shadow-sm shadow-sky-950/40'
+                      : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  <Maximize className="w-3.5 h-3.5 shrink-0" />
+                  <span className="leading-tight text-center">
+                    {studioT.customMediaModeBackdrop}
+                  </span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  aria-pressed={showCoverCaption}
+                  onClick={onToggleCoverCaption}
+                  className={`min-h-[44px] py-2 px-2 rounded-xl border text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                    showCoverCaption
+                      ? 'bg-sky-600/30 border-sky-400/60 text-white shadow-sm shadow-sky-950/40'
+                      : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  <Type className="w-3.5 h-3.5 shrink-0" />
+                  <span className="leading-tight text-center">
+                    {studioT.customMediaCaptionBtn}
+                  </span>
+                </button>
+              ))}
           </div>
 
           {/* Sub-row 1: Rotation target options (when Rotating Frame is ON) */}
@@ -504,8 +568,8 @@ export function StageMediaModal({
             </div>
           )}
 
-          {/* Sub-row 2: Fullscreen overlay options (when Fullscreen is active) */}
-          {customMedia && hasBackdropActive && (
+          {/* Sub-row 2: Fullscreen overlay options (when Fullscreen is active for audio tracks) */}
+          {customMedia && !ownsFullscreenBackdrop && hasBackdropActive && (
             <div className="p-2 rounded-2xl bg-sky-500/10 border border-sky-400/25 grid grid-cols-3 gap-1.5">
               <button
                 type="button"
@@ -552,30 +616,32 @@ export function StageMediaModal({
           )}
         </div>
 
-        {/* Audio Mixer: Audio track volume + optional video sound + optional mic volume */}
+        {/* Audio Mixer: Audio/video track volume + overlay video sound + 3rd background audio + optional mic volume */}
         <div className="space-y-3 p-3.5 rounded-2xl bg-white/5 border border-white/10">
-          {/* Audio track volume */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-medium text-gray-200 flex items-center gap-1.5">
-                <Music className="w-3.5 h-3.5 text-purple-300 shrink-0" />
-                <span>{studioT.customMediaTrackVolumeLabel}</span>
-              </span>
-              <span className="text-[11px] font-mono tabular-nums text-gray-200">
-                {Math.round(effectiveTrackVol * 100)}%
-              </span>
+          {/* Audio / primary video track volume */}
+          {(!ownsFullscreenBackdrop || isVideoTrack) && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-gray-200 flex items-center gap-1.5">
+                  <Music className="w-3.5 h-3.5 text-purple-300 shrink-0" />
+                  <span>{studioT.customMediaTrackVolumeLabel}</span>
+                </span>
+                <span className="text-[11px] font-mono tabular-nums text-gray-200">
+                  {Math.round(effectiveTrackVol * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.02}
+                value={effectiveTrackVol}
+                aria-label={studioT.customMediaTrackVolumeLabel}
+                onChange={(e) => onChangeTrackVolume(parseFloat(e.target.value))}
+                className="w-full h-1.5 bg-white/15 rounded-full cursor-pointer"
+              />
             </div>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.02}
-              value={effectiveTrackVol}
-              aria-label={studioT.customMediaTrackVolumeLabel}
-              onChange={(e) => onChangeTrackVolume(parseFloat(e.target.value))}
-              className="w-full h-1.5 bg-white/15 rounded-full cursor-pointer"
-            />
-          </div>
+          )}
 
           {/* Video sound controls */}
           {customMedia?.kind === 'video' && (
@@ -630,6 +696,65 @@ export function StageMediaModal({
             </div>
           )}
 
+          {/* 3rd background audio track controls */}
+          {stageAudio && (
+            <div
+              className={`${
+                !ownsFullscreenBackdrop || isVideoTrack || customMedia?.kind === 'video'
+                  ? 'pt-2.5 border-t border-white/10'
+                  : ''
+              } space-y-2.5`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-amber-200 flex items-center gap-1.5 min-w-0">
+                  <Music className="w-3.5 h-3.5 shrink-0 text-amber-300" />
+                  <span className="truncate">{studioT.customMediaBgAudioVolumeLabel}</span>
+                </span>
+                {onToggleStageAudio && (
+                  <button
+                    type="button"
+                    aria-pressed={stageAudio.enabled}
+                    onClick={onToggleStageAudio}
+                    className={`px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
+                      stageAudio.enabled
+                        ? 'bg-amber-600/25 border-amber-400/50 text-amber-100'
+                        : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'
+                    }`}
+                  >
+                    {stageAudio.enabled ? (
+                      <Volume2 className="w-3.5 h-3.5 shrink-0" />
+                    ) : (
+                      <VolumeX className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    <span className="whitespace-nowrap">
+                      {stageAudio.enabled
+                        ? studioT.customMediaSoundOn
+                        : studioT.customMediaSoundOff}
+                    </span>
+                  </button>
+                )}
+              </div>
+
+              {stageAudio.enabled && onChangeStageAudioVolume && (
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.02}
+                    value={stageAudio.volume}
+                    aria-label={studioT.customMediaBgAudioVolumeLabel}
+                    onChange={(e) => onChangeStageAudioVolume(parseFloat(e.target.value))}
+                    className="flex-1 h-1.5 bg-white/15 rounded-full cursor-pointer"
+                  />
+                  <span className="text-[11px] font-mono tabular-nums text-amber-200 w-9 text-right">
+                    {Math.round(stageAudio.volume * 100)}%
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Microphone volume & echo filter toggle */}
           {micEnabled && (
             <div className="pt-2.5 border-t border-white/10 space-y-2">
@@ -678,7 +803,7 @@ export function StageMediaModal({
           )}
         </div>
 
-        {(customMedia || micEnabled) && (
+        {(customMedia || micEnabled || stageAudio) && (
           <div className="grid grid-cols-2 gap-2 pt-1">
             <button
               type="button"

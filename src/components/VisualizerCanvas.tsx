@@ -40,10 +40,13 @@ interface VisualizerCanvasProps {
   studioFrameRef?: MutableRefObject<StudioFrameState | null>;
   studioActive?: boolean;
   videoElement?: HTMLVideoElement | null;
+  videoElementRef?: RefObject<HTMLVideoElement | null>;
   customStageMedia?: CustomStageMedia | null;
   cameraOverlayActive?: boolean;
   customBgVideoElement?: HTMLVideoElement | null;
+  customBgVideoElementRef?: RefObject<HTMLVideoElement | null>;
   cameraVideoElement?: HTMLVideoElement | null;
+  cameraVideoElementRef?: RefObject<HTMLVideoElement | null>;
   activeCoverSrc?: string;
   activeMediaType?: MediaKind;
   coverFrameMotion?: FrameMotionMode;
@@ -71,10 +74,13 @@ export function VisualizerCanvas({
   studioFrameRef: externalStudioFrameRef,
   studioActive = false,
   videoElement = null,
+  videoElementRef,
   customStageMedia = null,
   cameraOverlayActive = false,
   customBgVideoElement = null,
+  customBgVideoElementRef,
   cameraVideoElement = null,
+  cameraVideoElementRef,
   activeCoverSrc,
   activeMediaType,
   coverFrameMotion = 'static',
@@ -141,10 +147,13 @@ export function VisualizerCanvas({
     isZenMode,
     studioActive,
     videoElement,
+    videoElementRef,
     customStageMedia,
     cameraOverlayActive,
     customBgVideoElement,
+    customBgVideoElementRef,
     cameraVideoElement,
+    cameraVideoElementRef,
     activeCoverSrc,
     activeMediaType,
     coverFrameMotion,
@@ -171,10 +180,13 @@ export function VisualizerCanvas({
     isZenMode,
     studioActive,
     videoElement,
+    videoElementRef,
     customStageMedia,
     cameraOverlayActive,
     customBgVideoElement,
+    customBgVideoElementRef,
     cameraVideoElement,
+    cameraVideoElementRef,
     activeCoverSrc,
     activeMediaType,
     coverFrameMotion,
@@ -371,11 +383,14 @@ export function VisualizerCanvas({
         visualDna: dna,
         isZenMode: zen,
         studioActive: inStudio,
-        videoElement: vidEl,
+        videoElement: vidElProp,
+        videoElementRef: vidElRef,
         customStageMedia: customMediaNow,
         cameraOverlayActive: camPipNow,
-        customBgVideoElement: customVidEl,
-        cameraVideoElement: camVidEl,
+        customBgVideoElement: customVidElProp,
+        customBgVideoElementRef: customVidElRef,
+        cameraVideoElement: camVidElProp,
+        cameraVideoElementRef: camVidElRef,
         activeCoverSrc: coverSrcNow,
         activeMediaType: mediaTypeNow,
         coverFrameMotion: coverMotionNow,
@@ -389,6 +404,10 @@ export function VisualizerCanvas({
         layeredBg: layeredNow,
         liveOrbsSnapshotRef: orbsSnapRef,
       } = stateRef.current;
+
+      const vidEl = vidElRef?.current ?? vidElProp;
+      const customVidEl = customVidElRef?.current ?? customVidElProp;
+      const camVidEl = camVidElRef?.current ?? camVidElProp;
 
       if (armedNow) {
         const expectedDims = getRecordingDimensions(aspectNow, qualityNow);
@@ -432,27 +451,31 @@ export function VisualizerCanvas({
         externalStudioFrameRef.current = activeFrame;
       }
 
-      const hasLiveVideo =
-        inStudio &&
-        mediaTypeNow === 'video' &&
+      const isVideoTrackNow = mediaTypeNow === 'video';
+      const isImageTrackNow = mediaTypeNow === 'image';
+      const isMainMediaTrackNow = isVideoTrackNow || isImageTrackNow;
+
+      const hasLiveTrackVideo =
+        (inStudio || armedNow || recordingNow) &&
+        isVideoTrackNow &&
         Boolean(vidEl && vidEl.readyState >= 2 && vidEl.videoWidth > 0);
-      const imgResolved = !hasLiveVideo
+      const imgResolved = !isVideoTrackNow
         ? getCorsSafeImage(coverSrcNow || DEFAULT_COVER_IMAGE)
         : null;
       const hasLoadedImg = Boolean(imgResolved?.ok && imgResolved.img);
 
-      let mediaSource: CanvasImageSource | null = hasLiveVideo
-        ? vidEl
+      let mediaSource: CanvasImageSource | null = isMainMediaTrackNow
+        ? null
         : hasLoadedImg
         ? imgResolved!.img
         : null;
-      let mediaWidth = hasLiveVideo
-        ? vidEl!.videoWidth
+      let mediaWidth = isMainMediaTrackNow
+        ? 0
         : hasLoadedImg
         ? imgResolved!.img.naturalWidth
         : 0;
-      let mediaHeight = hasLiveVideo
-        ? vidEl!.videoHeight
+      let mediaHeight = isMainMediaTrackNow
+        ? 0
         : hasLoadedImg
         ? imgResolved!.img.naturalHeight
         : 0;
@@ -460,14 +483,53 @@ export function VisualizerCanvas({
       let backdropSource: CanvasImageSource | null = null;
       let backdropWidth = 0;
       let backdropHeight = 0;
-      let skipFallbackCenterOrb = false;
+      let skipFallbackCenterOrb = isMainMediaTrackNow;
 
-      const customApplies =
-        (Boolean(customMediaNow) || camPipNow) &&
-        mediaTypeNow !== 'video' &&
-        mediaTypeNow !== 'image';
+      if (hasLiveTrackVideo && vidEl) {
+        backdropSource = vidEl;
+        backdropWidth = vidEl.videoWidth;
+        backdropHeight = vidEl.videoHeight;
+      } else if (isImageTrackNow && hasLoadedImg && imgResolved?.img) {
+        backdropSource = imgResolved.img;
+        backdropWidth = imgResolved.img.naturalWidth;
+        backdropHeight = imgResolved.img.naturalHeight;
+      }
 
-      if (customApplies && customMediaNow) {
+      const customApplies = Boolean(customMediaNow) || camPipNow;
+
+      if (isMainMediaTrackNow) {
+        if (customApplies) {
+          let overlaySrc: CanvasImageSource | null = null;
+          let overlayW = 0;
+          let overlayH = 0;
+
+          if (camPipNow || customMediaNow?.kind === 'camera') {
+            const activeCamEl = camVidEl || customVidEl;
+            if (activeCamEl && activeCamEl.readyState >= 2 && activeCamEl.videoWidth > 0) {
+              overlaySrc = activeCamEl;
+              overlayW = activeCamEl.videoWidth;
+              overlayH = activeCamEl.videoHeight;
+            }
+          } else if (customMediaNow?.kind === 'video') {
+            if (customVidEl && customVidEl.readyState >= 2 && customVidEl.videoWidth > 0) {
+              overlaySrc = customVidEl;
+              overlayW = customVidEl.videoWidth;
+              overlayH = customVidEl.videoHeight;
+            }
+          } else if (customMediaNow?.src) {
+            const customImgResolved = getCorsSafeImage(customMediaNow.src);
+            if (customImgResolved?.ok && customImgResolved.img) {
+              overlaySrc = customImgResolved.img;
+              overlayW = customImgResolved.img.naturalWidth;
+              overlayH = customImgResolved.img.naturalHeight;
+            }
+          }
+
+          mediaSource = overlaySrc;
+          mediaWidth = overlayW;
+          mediaHeight = overlayH;
+        }
+      } else if (customApplies && customMediaNow) {
         let customSrc: CanvasImageSource | null = null;
         let customW = 0;
         let customH = 0;
@@ -536,17 +598,21 @@ export function VisualizerCanvas({
 
       const isEditingStudioFrame =
         Boolean(activeFrame?.editMode) || gestureRef.current.pointerId !== null;
-      const frameApplies =
-        customApplies && (camPipNow || customMediaNow?.displayMode === 'frame');
-      const backdropApplies =
-        customApplies && Boolean(customMediaNow) && (camPipNow || customMediaNow?.displayMode === 'backdrop');
-      const cleanBackdropNow =
-        backdropApplies && !camPipNow && customMediaNow?.backdropOverlay === 'clean';
+      const frameApplies = isMainMediaTrackNow
+        ? customApplies
+        : customApplies && (camPipNow || customMediaNow?.displayMode === 'frame');
+      const backdropApplies = isMainMediaTrackNow
+        ? isMainMediaTrackNow
+        : customApplies && Boolean(customMediaNow) && (camPipNow || customMediaNow?.displayMode === 'backdrop');
+      const cleanBackdropNow = isMainMediaTrackNow
+        ? true
+        : backdropApplies && !camPipNow && customMediaNow?.backdropOverlay === 'clean';
       const showCoverCaptionNow =
         !frameApplies &&
         !cleanBackdropNow &&
-        mediaTypeNow !== 'video' &&
-        mediaTypeNow !== 'image';
+        !isMainMediaTrackNow;
+
+      const effectiveStudioActive = isMainMediaTrackNow ? frameApplies : inStudio;
 
       stepAndRenderVisualizerFrame({
         ctx,
@@ -562,7 +628,7 @@ export function VisualizerCanvas({
         isZenMode: zen,
         isRecordArmed: armedNow,
         isRecording: recordingNow,
-        studioActive: inStudio,
+        studioActive: effectiveStudioActive,
         layeredBg: layeredNow,
         prefersReducedMotion,
         studioFrame: activeFrame,
@@ -579,9 +645,13 @@ export function VisualizerCanvas({
         backdropSource,
         backdropWidth,
         backdropHeight,
-        backdropOverlay: backdropApplies ? customMediaNow?.backdropOverlay ?? 'visualizer' : undefined,
+        backdropOverlay: isMainMediaTrackNow
+          ? 'clean'
+          : backdropApplies
+          ? customMediaNow?.backdropOverlay ?? 'visualizer'
+          : undefined,
         skipFallbackCenterOrb,
-        showStudioOverlay: Boolean(inStudio && activeFrame?.editMode && !recordingNow),
+        showStudioOverlay: Boolean(effectiveStudioActive && activeFrame?.editMode && !recordingNow),
         orbSnapshots: orbsSnapRef?.current ?? null,
         orbViewportWidth: window.innerWidth || width,
         orbViewportHeight: window.innerHeight || height,
@@ -624,8 +694,16 @@ export function VisualizerCanvas({
     }
   };
 
+  const isStudioFrameInteractable = () => {
+    const s = stateRef.current;
+    if (s.activeMediaType === 'video' || s.activeMediaType === 'image') {
+      return Boolean(s.customStageMedia || s.cameraOverlayActive);
+    }
+    return s.studioActive;
+  };
+
   const handleCanvasPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    const canStudio = stateRef.current.studioActive;
+    const canStudio = isStudioFrameInteractable();
     const canRecordTap = stateRef.current.isRecordArmed && !stateRef.current.isRecording;
     if (!canStudio && !canRecordTap) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -679,7 +757,7 @@ export function VisualizerCanvas({
 
   const handleCanvasPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     const g = gestureRef.current;
-    const canStudio = stateRef.current.studioActive;
+    const canStudio = isStudioFrameInteractable();
     const canRecordTap = stateRef.current.isRecordArmed && !stateRef.current.isRecording;
     if ((!canStudio && !canRecordTap) || g.pointerId !== e.pointerId) return;
 
@@ -752,7 +830,7 @@ export function VisualizerCanvas({
     }
 
     const frame = studioFrameRef.current;
-    const canStudio = stateRef.current.studioActive;
+    const canStudio = isStudioFrameInteractable();
     const canRecordTap = stateRef.current.isRecordArmed && !stateRef.current.isRecording;
     if (!cancelled && (canStudio || canRecordTap)) {
       if (!g.longPressFired && g.movedDist <= 9) {
@@ -784,12 +862,15 @@ export function VisualizerCanvas({
     g.target = null;
   };
 
-  const canInteractCanvas = studioActive || (isRecordArmed && !isRecording);
+  const isMainMediaProp = activeMediaType === 'video' || activeMediaType === 'image';
+  const hasOverlayFrame = Boolean(customStageMedia || cameraOverlayActive);
+  const canInteractFrame = isMainMediaProp ? hasOverlayFrame : studioActive;
+  const canInteractCanvas = canInteractFrame || (isRecordArmed && !isRecording);
 
   return (
     <div
       className={`fixed inset-0 pointer-events-none ${
-        studioActive || isRecordArmed ? 'z-10' : 'z-0'
+        studioActive || isRecordArmed || canInteractFrame ? 'z-10' : 'z-0'
       } ${
         isRecordArmed
           ? `flex items-center justify-center bg-[#050508] px-3 ${
@@ -810,7 +891,7 @@ export function VisualizerCanvas({
             ? 'rounded-xl ring-1 ring-white/20 shadow-[0_0_50px_rgba(0,0,0,0.88)]'
             : 'fixed inset-0 w-full h-full'
         } ${
-          studioActive
+          canInteractFrame
             ? 'pointer-events-auto touch-none cursor-grab active:cursor-grabbing'
             : canInteractCanvas
             ? 'pointer-events-auto touch-none cursor-pointer'

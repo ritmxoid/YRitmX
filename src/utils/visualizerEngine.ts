@@ -364,9 +364,10 @@ export function stepAndRenderVisualizerFrame(params: RenderVisualizerFrameParams
   ctx.fillRect(0, 0, width, height);
 
   const hasCustomBackdrop = Boolean(backdropSource && backdropWidth > 0 && backdropHeight > 0);
-  const effectiveOverlay: BackdropOverlayMode = hasCustomBackdrop
-    ? backdropOverlay
-    : 'visualizer';
+  const effectiveOverlay: BackdropOverlayMode =
+    hasCustomBackdrop || backdropOverlay === 'clean'
+      ? backdropOverlay
+      : 'visualizer';
 
   if (hasCustomBackdrop && backdropSource) {
     ctx.save();

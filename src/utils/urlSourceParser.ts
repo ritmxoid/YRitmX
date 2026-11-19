@@ -121,13 +121,16 @@ function parseM3uPlaylist(text: string, baseUrl: string): Track[] {
 
     try {
       const resolved = new URL(line, baseUrl).toString();
+      const parsedEntry = new URL(resolved);
+      const isRadioEntry = isLikelyDirectAudioStreamUrl(parsedEntry);
       tracks.push({
         id: `url-m3u-${tracks.length}-${resolved}`,
-        title: pendingTitle || titleFromUrl(resolved, tracks.length),
-        artist: pendingArtist || new URL(baseUrl).hostname,
+        title: pendingTitle || (isRadioEntry ? 'RadioFM' : titleFromUrl(resolved, tracks.length)),
+        artist: pendingArtist || parsedEntry.hostname,
         cover: DEFAULT_COVER_IMAGE,
         src: resolved,
-        sourceName: `URL: ${new URL(baseUrl).hostname}`,
+        sourceName: isRadioEntry ? 'RadioFM' : `URL: ${new URL(baseUrl).hostname}`,
+        ...(isRadioEntry ? { mediaType: 'audio' as const, isRadio: true } : {}),
       });
     } catch {
       // skip invalid url line
@@ -394,14 +397,19 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
     .map((l) => l.trim())
     .filter(Boolean);
   if (lines.length > 1 && lines.every((l) => /^https?:\/\//i.test(l))) {
-    const tracks: Track[] = lines.map((line, idx) => ({
-      id: `url-direct-${idx}-${line}`,
-      title: titleFromUrl(line, idx),
-      artist: new URL(line).hostname,
-      cover: DEFAULT_COVER_IMAGE,
-      src: line,
-      sourceName: t.urlListSourceName,
-    }));
+    const tracks: Track[] = lines.map((line, idx) => {
+      const parsedLine = new URL(line);
+      const isRadioLine = isLikelyDirectAudioStreamUrl(parsedLine);
+      return {
+        id: `url-direct-${idx}-${line}`,
+        title: isRadioLine ? 'RadioFM' : titleFromUrl(line, idx),
+        artist: parsedLine.hostname,
+        cover: DEFAULT_COVER_IMAGE,
+        src: line,
+        sourceName: isRadioLine ? 'RadioFM' : t.urlListSourceName,
+        ...(isRadioLine ? { mediaType: 'audio' as const, isRadio: true } : {}),
+      };
+    });
     return {
       tracks,
       label: t.urlListLabel(tracks.length),
