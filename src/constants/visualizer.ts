@@ -1,4 +1,4 @@
-import defaultCoverImg from '../assets/images/default_album_cover_1794804180441.jpg';
+import defaultCoverImg from '../assets/images/default_yritmx_cover.svg';
 import demoCosmicImg from '../assets/images/demo_cosmic_cover_1794804181390.jpg';
 import demoSynthwaveImg from '../assets/images/demo_synthwave_cover_1794804180575.jpg';
 import { EqPreset, PaletteConfig, VisualDNA, VizModeConfig } from '../types/audio';
