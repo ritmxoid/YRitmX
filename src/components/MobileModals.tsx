@@ -6,6 +6,8 @@ import {
   Eye,
   FolderOpen,
   Globe,
+  HelpCircle,
+  ImagePlus,
   Layers,
   ListMusic,
   Maximize2,
@@ -17,8 +19,15 @@ import {
   Type,
   X,
 } from 'lucide-react';
-import { PALETTES, VIZ_MODES } from '../constants/visualizer';
+import {
+  CAROUSEL_INTERVAL_OPTIONS,
+  PALETTES,
+  VIZ_CAROUSEL_MODE_ID,
+  VIZ_MODES,
+} from '../constants/visualizer';
 import { useI18n } from '../i18n/I18nContext';
+import { getHelpMessages } from '../i18n/helpMessages';
+import { getStudioMessages } from '../i18n/studioMessages';
 import { SourceTab, Track } from '../types/audio';
 import { PlaylistItems } from './PlaylistItems';
 
@@ -26,21 +35,27 @@ interface MobileMenuModalProps {
   isOpen: boolean;
   onClose: () => void;
   vizMode: number;
+  isCarouselMode: boolean;
+  carouselIntervalSec: number;
   paletteIndex: number;
   autoVisualPerTrack: boolean;
   mixEnabled: boolean;
   showOrbs: boolean;
   showOrbCaptions: boolean;
+  hasCustomStageMedia?: boolean;
   isAppInstalled: boolean;
   isFullscreen: boolean;
   onChangeVizMode: (val: number) => void;
+  onChangeCarouselInterval: (sec: number) => void;
   onChangePalette: (val: number) => void;
   onToggleAutoVisual: () => void;
   onToggleMix: () => void;
   onToggleOrbs: () => void;
   onToggleOrbCaptions: () => void;
+  onOpenStageMedia?: () => void;
   onOpenSources: (tab: SourceTab) => void;
   onOpenEqualizer: () => void;
+  onOpenHelp?: () => void;
   onToggleUI: () => void;
   onToggleFullscreen: () => void;
   onInstallApp: () => void;
@@ -50,26 +65,34 @@ export function MobileMenuModal({
   isOpen,
   onClose,
   vizMode,
+  isCarouselMode,
+  carouselIntervalSec,
   paletteIndex,
   autoVisualPerTrack,
   mixEnabled,
   showOrbs,
   showOrbCaptions,
+  hasCustomStageMedia = false,
   isAppInstalled,
   isFullscreen,
   onChangeVizMode,
+  onChangeCarouselInterval,
   onChangePalette,
   onToggleAutoVisual,
   onToggleMix,
   onToggleOrbs,
   onToggleOrbCaptions,
+  onOpenStageMedia,
   onOpenSources,
   onOpenEqualizer,
+  onOpenHelp,
   onToggleUI,
   onToggleFullscreen,
   onInstallApp,
 }: MobileMenuModalProps) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const studioT = getStudioMessages(lang);
+  const helpT = getHelpMessages(lang);
 
   if (!isOpen) return null;
 
@@ -101,22 +124,87 @@ export function MobileMenuModal({
         </div>
 
         <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onOpenSources('audius');
+              }}
+              className="py-2.5 px-2 rounded-xl bg-sky-600/20 text-sky-300 border border-sky-500/30 text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              <span>{t.tabAudius}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onOpenSources('folder');
+              }}
+              className="py-2.5 px-2 rounded-xl bg-purple-600/20 text-purple-300 border border-purple-500/30 text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              <span>{t.shortFolder}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onOpenSources('url');
+              }}
+              className="py-2.5 px-2 rounded-xl bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>URL</span>
+            </button>
+          </div>
+
           <div>
             <label htmlFor="mobile-viz-select" className="text-xs text-gray-400 block mb-1.5">
               {t.vizModeField}
             </label>
             <select
               id="mobile-viz-select"
-              value={vizMode}
+              value={isCarouselMode ? VIZ_CAROUSEL_MODE_ID : vizMode}
               onChange={(e) => onChangeVizMode(parseInt(e.target.value, 10))}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-purple-300 font-semibold focus:outline-none focus:border-purple-500"
             >
+              <option value={VIZ_CAROUSEL_MODE_ID} className="bg-gray-900 text-purple-300 font-semibold">
+                {studioT.carouselModeLabel}
+              </option>
               {VIZ_MODES.map((m, idx) => (
                 <option key={m.id} value={m.id} className="bg-gray-900 text-gray-100">
                   {t.vizModes[idx] ?? m.label}
                 </option>
               ))}
             </select>
+            {isCarouselMode && (
+              <div
+                role="group"
+                aria-label={studioT.carouselIntervalAria}
+                className="grid grid-cols-6 gap-1.5 mt-2"
+              >
+                {CAROUSEL_INTERVAL_OPTIONS.map((sec) => {
+                  const active = carouselIntervalSec === sec;
+                  return (
+                    <button
+                      key={sec}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => onChangeCarouselInterval(sec)}
+                      className={`py-1.5 px-1 rounded-lg border text-[11px] font-semibold tabular-nums transition cursor-pointer ${
+                        active
+                          ? 'bg-purple-600/35 border-purple-400 text-white shadow-sm shadow-purple-950/40'
+                          : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      {studioT.carouselSecondsBtn(sec)}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div>
@@ -206,41 +294,26 @@ export function MobileMenuModal({
             </button>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
+          {onOpenStageMedia && (
             <button
               type="button"
               onClick={() => {
                 onClose();
-                onOpenSources('audius');
+                onOpenStageMedia();
               }}
-              className="py-2.5 px-2 rounded-xl bg-sky-600/20 text-sky-300 border border-sky-500/30 text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer"
+              aria-pressed={hasCustomStageMedia}
+              className={`w-full py-2.5 px-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                hasCustomStageMedia
+                  ? 'bg-fuchsia-600/25 border-fuchsia-400/50 text-fuchsia-100'
+                  : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-200'
+              }`}
             >
-              <Cloud className="w-3.5 h-3.5" />
-              <span>{t.tabAudius}</span>
+              <ImagePlus className="w-3.5 h-3.5 text-fuchsia-300 shrink-0" />
+              <span className="truncate">
+                {hasCustomStageMedia ? studioT.customMediaActiveBtn : studioT.customMediaBtn}
+              </span>
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onOpenSources('folder');
-              }}
-              className="py-2.5 px-2 rounded-xl bg-purple-600/20 text-purple-300 border border-purple-500/30 text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer"
-            >
-              <FolderOpen className="w-3.5 h-3.5" />
-              <span>{t.shortFolder}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onOpenSources('url');
-              }}
-              className="py-2.5 px-2 rounded-xl bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center justify-center gap-1 cursor-pointer"
-            >
-              <Globe className="w-3.5 h-3.5" />
-              <span>URL</span>
-            </button>
-          </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -277,6 +350,20 @@ export function MobileMenuModal({
               </span>
             </button>
           </div>
+
+          {onOpenHelp && (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onOpenHelp();
+              }}
+              className="w-full py-2.5 px-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-200 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition"
+            >
+              <HelpCircle className="w-4 h-4 text-purple-300 shrink-0" />
+              <span className="truncate">{helpT.helpMenuBtn}</span>
+            </button>
+          )}
 
           <button
             type="button"

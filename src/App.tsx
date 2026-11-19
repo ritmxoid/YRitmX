@@ -4,8 +4,11 @@ import {
   Download,
   Eye,
   EyeOff,
+  Film,
   FolderOpen,
   Globe,
+  HelpCircle,
+  ImagePlus,
   Layers,
   ListMusic,
   Maximize2,
@@ -20,13 +23,17 @@ import {
   SkipForward,
   Sliders,
   Sparkles,
+  Square,
   Type,
+  Video,
   Volume2,
   VolumeX,
+  X,
 } from 'lucide-react';
-import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DragEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EqualizerModal } from './components/EqualizerModal';
 import { FloatingTrackOrbs } from './components/FloatingTrackOrbs';
+import { HelpModal } from './components/HelpModal';
 import {
   FirstLaunchInstallModal,
   MobileMenuModal,
@@ -35,35 +42,70 @@ import {
 } from './components/MobileModals';
 import { PlaylistItems } from './components/PlaylistItems';
 import { SourcesModal } from './components/SourcesModal';
+import { StageMediaModal } from './components/StageMediaModal';
+import { StudioRecordBar } from './components/StudioRecordBar';
 import { VisualizerCanvas } from './components/VisualizerCanvas';
 import { useFullscreen } from './hooks/useFullscreen';
 import { usePWAInstall } from './hooks/usePWAInstall';
+import { getRecordingDimensions } from './constants/recording';
 import {
+  CAROUSEL_INTERVAL_OPTIONS,
+  createRandomVisualDna,
   DEFAULT_COVER_IMAGE,
   EQ_BANDS,
   PALETTES,
+  pickRandomMixLayers,
+  VIZ_CAROUSEL_MODE_ID,
   VIZ_MODES,
 } from './constants/visualizer';
 import { APP_VERSION } from './constants/version';
 import {
+  BackdropOverlayMode,
   ConfirmDeleteTarget,
+  CustomStageMedia,
+  FrameMotionMode,
+  FrameRotationTarget,
+  MediaKind,
+  RecordAspectRatio,
+  RecordQualityPreset,
+  RecordRenderMode,
   SavedFolderEntry,
   SavedUrlEntry,
   SourceTab,
+  StageMediaDisplayMode,
+  StageMediaItem,
   ToastMessage,
   Track,
   VisualDNA,
 } from './types/audio';
 import { useI18n } from './i18n/I18nContext';
+import { getHelpMessages } from './i18n/helpMessages';
+import { getStudioMessages } from './i18n/studioMessages';
 import { trackEvent } from './utils/analytics';
-import { DEFAULT_AUDIUS_HANDLE, fetchAudiusProfileTracks } from './utils/audiusApi';
+import {
+  exportStudioVideoOffline,
+  isExportAbortError,
+  OfflineCorsAudioError,
+  OfflineExportStage,
+  resolveOfflineVideoCapability,
+  safeFixMp4,
+} from './utils/offlineVideoExporter';
+import { LiveOrbSnapshot, StudioFrameState } from './utils/studioFrameRenderer';
+import {
+  DEFAULT_AUDIUS_HANDLE,
+  fetchAudiusProfileTracks,
+  getDefaultAudiusHandleForBrowser,
+} from './utils/audiusApi';
 import { createDemoTracks } from './utils/demoAudioGenerator';
 import {
   deleteDirectoryHandle,
+  deleteFolderFiles,
   getDirectoryHandle,
+  getFolderFiles,
   queryDirectoryPermission,
   readAudioFilesFromDirectoryHandle,
   saveDirectoryHandle,
+  saveFolderFiles,
 } from './utils/folderHandleStore';
 import { parseAudioMetadata } from './utils/id3Parser';
 import {
@@ -83,9 +125,21 @@ const STORAGE_URLS_KEY = 'yritmx_saved_urls';
 const STORAGE_CAPTIONS_KEY = 'yritmx_orb_captions';
 const STORAGE_ORBS_KEY = 'yritmx_show_orbs';
 const STORAGE_INSTALL_PROMO_KEY = 'yritmx_install_promo_seen';
+const STORAGE_RECORD_RENDER_MODE_KEY = 'yritmx_record_render_mode';
+const STORAGE_CAROUSEL_MODE_KEY = 'yritmx_carousel_mode';
+const STORAGE_CAROUSEL_INTERVAL_KEY = 'yritmx_carousel_interval_sec';
+const STORAGE_MANUAL_AUDIUS_KEY = 'yritmx_manual_audius';
+const FALLBACK_RADIO_STREAM_URL = 'https://media-ice.musicradio.com/CapitalMP3';
+const IMAGE_SLIDE_DURATION_SEC = 5;
 
-// Ambient/backdrop layers that blend cleanly behind any foreground visualizer without clutter
-const AMBIENT_MIX_POOL = [0, 4, 8, 9, 10, 11, 12, 13, 16, 19, 20, 22, 24, 26];
+function shuffleTracksArray<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -103,64 +157,55 @@ function hashString(str: string): number {
   return Math.abs(h);
 }
 
-function pickRandomMixLayers(primaryMode: number, count: number): number[] {
-  if (count <= 0) return [];
-  const candidates = AMBIENT_MIX_POOL.filter((id) => id !== primaryMode);
-  const picked: number[] = [];
-  while (picked.length < count && candidates.length > 0) {
-    const idx = Math.floor(Math.random() * candidates.length);
-    picked.push(candidates.splice(idx, 1)[0]);
+function isManualAudiusSelection(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_MANUAL_AUDIUS_KEY) === '1';
+  } catch {
+    return false;
   }
-  return picked;
-}
-
-function createRandomVisualDna(primaryMode: number, mixEnabled: boolean): VisualDNA {
-  let extraCount = 0;
-  if (mixEnabled) {
-    const roll = Math.random();
-    if (roll < 0.4) {
-      extraCount = 0; // Чистая одиночная тема для разнообразия
-    } else if (roll < 0.75) {
-      extraCount = 1; // 2 совмещённых фона
-    } else {
-      extraCount = 2; // 3 совмещённых фона
-    }
-  }
-  return {
-    seed: Math.random() * 10000 + 1,
-    hueShift: Math.round((Math.random() - 0.5) * 320),
-    dynamics: 0.72 + Math.random() * 0.78,
-    density: 0.68 + Math.random() * 0.72,
-    glow: 0.75 + Math.random() * 0.65,
-    direction: Math.random() > 0.5 ? 1 : -1,
-    mixLayers: pickRandomMixLayers(primaryMode, extraCount),
-  };
 }
 
 function getInitialProfiles(): string[] {
+  const browserDefault = getDefaultAudiusHandleForBrowser();
   try {
     const raw = localStorage.getItem(STORAGE_PROFILES_KEY);
-    if (raw === null) return [DEFAULT_AUDIUS_HANDLE];
+    if (raw === null) return [browserDefault];
     const parsed = JSON.parse(raw) as unknown;
     if (Array.isArray(parsed)) {
-      const cleaned = parsed
+      let cleaned = parsed
         .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
         .map((x) => (x.toLowerCase() === 'ritmixoid' ? DEFAULT_AUDIUS_HANDLE : x));
+      if (!isManualAudiusSelection()) {
+        cleaned = cleaned.filter((x) => x.toLowerCase() !== 'nowellasarah');
+        if (!cleaned.some((x) => x.toLowerCase() === browserDefault.toLowerCase())) {
+          cleaned = [browserDefault, ...cleaned];
+        }
+      }
       return Array.from(new Set(cleaned));
     }
   } catch {
     // ignore storage errors
   }
-  return [DEFAULT_AUDIUS_HANDLE];
+  return [browserDefault];
 }
 
 function getInitialHandle(): string {
+  const browserDefault = getDefaultAudiusHandleForBrowser();
   try {
     const raw = localStorage.getItem(STORAGE_HANDLE_KEY);
-    if (!raw || raw.toLowerCase() === 'ritmixoid') return DEFAULT_AUDIUS_HANDLE;
-    return raw;
+    if (!raw) return browserDefault;
+    const normalized = raw.toLowerCase() === 'ritmixoid' ? DEFAULT_AUDIUS_HANDLE : raw;
+    if (
+      !isManualAudiusSelection() &&
+      (normalized.toLowerCase() === 'ritmxoid' ||
+        normalized.toLowerCase() === 'nowellasarah' ||
+        normalized.toLowerCase() === 'estelladawnmusic')
+    ) {
+      return browserDefault;
+    }
+    return normalized;
   } catch {
-    return DEFAULT_AUDIUS_HANDLE;
+    return browserDefault;
   }
 }
 
@@ -223,17 +268,46 @@ function resolveRestoreTarget(
 }
 
 export default function App() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
+  const studioT = useMemo(() => getStudioMessages(lang), [lang]);
+  const helpT = useMemo(() => getHelpMessages(lang), [lang]);
   const initialPrefsRef = useRef(loadPlayerPrefs());
   const initialSessionRef = useRef<SavedPlaybackSession | null>(loadPlaybackSession());
   const initialRestoreConsumedRef = useRef(false);
 
+  const masterCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const customBgVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const customBgInputRef = useRef<HTMLInputElement | null>(null);
+  const reselectFolderInputRef = useRef<HTMLInputElement | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
+  const customBgGainRef = useRef<GainNode | null>(null);
+  const micGainRef = useRef<GainNode | null>(null);
+  const micHighpassRef = useRef<BiquadFilterNode | null>(null);
+  const recLimiterRef = useRef<DynamicsCompressorNode | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraFacingRef = useRef<'user' | 'environment'>('user');
+  const firstFilterOrGainRef = useRef<AudioNode | null>(null);
+  const streamDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const filtersRef = useRef<BiquadFilterNode[]>([]);
   const sourceCreatedRef = useRef(false);
+  const videoSourceCreatedRef = useRef(false);
+  const customBgSourceCreatedRef = useRef(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<BlobPart[]>([]);
+  const recordingStartPerfRef = useRef(0);
+  const liveOrbsSnapshotRef = useRef<LiveOrbSnapshot[]>([]);
+  const studioFrameStateRef = useRef<StudioFrameState | null>(null);
+  const offlineAbortRef = useRef<AbortController | null>(null);
+  const playHoldTimerRef = useRef(0);
+  const playHoldTriggeredRef = useRef(false);
+  const isRecordingRef = useRef(false);
   const objectUrlsRef = useRef<string[]>([]);
   const folderCacheRef = useRef<Map<string, Track[]>>(new Map());
   const toastIdRef = useRef(1);
@@ -250,6 +324,30 @@ export default function App() {
   const playlistRef = useRef<Track[]>([]);
   const currentIndexRef = useRef(0);
   const isPlayingRef = useRef(false);
+  const isRecordArmedRef = useRef(false);
+  const isStudioModeRef = useRef(false);
+  const imageElapsedRef = useRef(0);
+
+  const [isStudioMode, setIsStudioMode] = useState(false);
+  const [isRecordArmed, setIsRecordArmed] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isHoldingPlay, setIsHoldingPlay] = useState(false);
+  const [recordAspect, setRecordAspect] = useState<RecordAspectRatio>(() =>
+    typeof window !== 'undefined' && window.innerHeight >= window.innerWidth ? '9:16' : '16:9'
+  );
+  const [recordQuality, setRecordQuality] = useState<RecordQualityPreset>('720p');
+  const [recordRenderMode, setRecordRenderMode] = useState<RecordRenderMode>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_RECORD_RENDER_MODE_KEY);
+      return saved === 'offline' ? 'offline' : 'live';
+    } catch {
+      return 'live';
+    }
+  });
+  const [offlineExportState, setOfflineExportState] = useState<{
+    progress: number;
+    stage: OfflineExportStage;
+  } | null>(null);
 
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const [playlist, setPlaylist] = useState<Track[]>([]);
@@ -267,6 +365,22 @@ export default function App() {
 
   const [mixEnabled, setMixEnabled] = useState(true);
   const [vizMode, setVizMode] = useState(() => Math.floor(Math.random() * VIZ_MODES.length));
+  const [isCarouselMode, setIsCarouselMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(STORAGE_CAROUSEL_MODE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [carouselIntervalSec, setCarouselIntervalSec] = useState<number>(() => {
+    try {
+      const parsed = Number(localStorage.getItem(STORAGE_CAROUSEL_INTERVAL_KEY));
+      return (CAROUSEL_INTERVAL_OPTIONS as readonly number[]).includes(parsed) ? parsed : 10;
+    } catch {
+      return 10;
+    }
+  });
+  const [carouselResetTick, setCarouselResetTick] = useState(0);
   const [paletteIndex, setPaletteIndex] = useState(() => Math.floor(Math.random() * PALETTES.length));
   const [visualDna, setVisualDna] = useState<VisualDNA>(() =>
     createRandomVisualDna(0, true)
@@ -332,8 +446,37 @@ export default function App() {
   const [isEqOpen, setIsEqOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobilePlaylistOpen, setIsMobilePlaylistOpen] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isInstallGuideOpen, setIsInstallGuideOpen] = useState(false);
   const [isInstallPromoOpen, setIsInstallPromoOpen] = useState(false);
+  const [customStageMedia, setCustomStageMedia] = useState<CustomStageMedia | null>(null);
+  const [coverFrameMotion, setCoverFrameMotion] = useState<FrameMotionMode>('static');
+  const [coverRotationTarget, setCoverRotationTarget] = useState<FrameRotationTarget>('none');
+  const [showCoverCaption, setShowCoverCaption] = useState(false);
+  const [stageMediaQueue, setStageMediaQueue] = useState<StageMediaItem[]>([]);
+  const [stageMediaIndex, setStageMediaIndex] = useState(0);
+  const [cameraOverlayActive, setCameraOverlayActive] = useState(false);
+  const [recordingElapsedSec, setRecordingElapsedSec] = useState(0);
+  const [isStageMediaOpen, setIsStageMediaOpen] = useState(false);
+  const [micEnabled, setMicEnabled] = useState(false);
+  const [micVolume, setMicVolume] = useState(1);
+  const [micEchoFilter, setMicEchoFilter] = useState(false);
+  const micEnabledRef = useRef(false);
+  const micVolumeRef = useRef(1);
+  const micEchoFilterRef = useRef(false);
+  const customStageMediaRef = useRef<CustomStageMedia | null>(null);
+  const coverFrameMotionRef = useRef<FrameMotionMode>('static');
+  const coverRotationTargetRef = useRef<FrameRotationTarget>('none');
+  const showCoverCaptionRef = useRef(false);
+  const stageMediaQueueRef = useRef<StageMediaItem[]>([]);
+  const stageMediaIndexRef = useRef(0);
+  const cameraOverlayActiveRef = useRef(false);
+  const lastRotationTargetRef = useRef<Exclude<FrameRotationTarget, 'none'>>('both');
+  const recordingStallCheckRef = useRef<{
+    lastTime: number;
+    stagnantTicks: number;
+    recovering: boolean;
+  }>({ lastTime: -1, stagnantTicks: 0, recovering: false });
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const { isInstallable, isInstalled, isIOS, promptInstall } = usePWAInstall();
@@ -369,6 +512,30 @@ export default function App() {
 
   useEffect(() => {
     return () => {
+      window.clearTimeout(playHoldTimerRef.current);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {
+          // ignore cleanup stop errors
+        }
+      }
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((tr) => tr.stop());
+        cameraStreamRef.current = null;
+      }
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach((tr) => tr.stop());
+        micStreamRef.current = null;
+      }
+      if (customStageMediaRef.current?.src.startsWith('blob:')) {
+        URL.revokeObjectURL(customStageMediaRef.current.src);
+      }
+      for (const item of stageMediaQueueRef.current) {
+        if (item.src.startsWith('blob:')) {
+          URL.revokeObjectURL(item.src);
+        }
+      }
       for (const url of objectUrlsRef.current) {
         URL.revokeObjectURL(url);
       }
@@ -406,17 +573,109 @@ export default function App() {
         return filter;
       });
 
+      const firstNode: AudioNode = filters[0] ?? gainNode;
+      for (let i = 0; i < filters.length - 1; i++) {
+        filters[i].connect(filters[i + 1]);
+      }
+      if (filters.length > 0) {
+        filters[filters.length - 1].connect(gainNode);
+      }
+
+      const streamDest = ctx.createMediaStreamDestination();
+      streamDestRef.current = streamDest;
+      firstFilterOrGainRef.current = firstNode;
+
+      // Silent 0-gain keepalive keeps MediaRecorder audio track active across seeks or track changes
+      try {
+        const keepaliveOsc = ctx.createOscillator();
+        const keepaliveGain = ctx.createGain();
+        keepaliveGain.gain.value = 0;
+        keepaliveOsc.connect(keepaliveGain);
+        keepaliveGain.connect(streamDest);
+        keepaliveOsc.start();
+      } catch {
+        // ignore if oscillator unavailable
+      }
+
+      // Studio mix limiter prevents digital clipping when layering music + video audio + mic
+      const recLimiter = ctx.createDynamicsCompressor();
+      recLimiter.threshold.value = -3;
+      recLimiter.knee.value = 6;
+      recLimiter.ratio.value = 8;
+      recLimiter.attack.value = 0.003;
+      recLimiter.release.value = 0.15;
+      recLimiter.connect(streamDest);
+      recLimiterRef.current = recLimiter;
+
+      // analyserNode acts as a leaf tap (never connected to ctx.destination) so mic audio never echoes out of speakers
+      gainNode.connect(analyserNode);
+      gainNode.connect(ctx.destination);
+      gainNode.connect(recLimiter);
+
       if (!sourceCreatedRef.current) {
-        const source = ctx.createMediaElementSource(audioEl);
-        let lastNode: AudioNode = source;
-        for (const f of filters) {
-          lastNode.connect(f);
-          lastNode = f;
+        try {
+          const source = ctx.createMediaElementSource(audioEl);
+          source.connect(firstNode);
+          sourceCreatedRef.current = true;
+        } catch {
+          // ignore duplicate media element hookup
         }
-        lastNode.connect(gainNode);
-        gainNode.connect(analyserNode);
-        analyserNode.connect(ctx.destination);
-        sourceCreatedRef.current = true;
+      }
+
+      if (videoRef.current && !videoSourceCreatedRef.current) {
+        try {
+          const vSource = ctx.createMediaElementSource(videoRef.current);
+          vSource.connect(firstNode);
+          videoSourceCreatedRef.current = true;
+        } catch {
+          // ignore duplicate media element hookup
+        }
+      }
+
+      // Video overlay gain is independent from track volume so user can lower music under video/voice
+      const bgGain = ctx.createGain();
+      const activeBg = customStageMediaRef.current;
+      bgGain.gain.value =
+        activeBg?.kind === 'video' && activeBg.soundEnabled && !isMuted
+          ? activeBg.soundVolume
+          : 0;
+      bgGain.connect(analyserNode);
+      bgGain.connect(ctx.destination);
+      bgGain.connect(recLimiter);
+      customBgGainRef.current = bgGain;
+
+      if (customBgVideoRef.current && !customBgSourceCreatedRef.current) {
+        try {
+          const bgSource = ctx.createMediaElementSource(customBgVideoRef.current);
+          bgSource.connect(bgGain);
+          customBgSourceCreatedRef.current = true;
+        } catch {
+          // ignore duplicate background video hookup
+        }
+      }
+
+      // Live microphone path: gentle 75Hz high-pass removes rumble/pops, never routed to ctx.destination
+      const micHighpass = ctx.createBiquadFilter();
+      micHighpass.type = 'highpass';
+      micHighpass.frequency.value = 75;
+      micHighpass.Q.value = 0.7;
+      micHighpassRef.current = micHighpass;
+
+      const micGain = ctx.createGain();
+      micGain.gain.value = micEnabledRef.current ? micVolumeRef.current : 0;
+      micHighpass.connect(micGain);
+      micGain.connect(analyserNode);
+      micGain.connect(recLimiter);
+      micGainRef.current = micGain;
+
+      if (micStreamRef.current && !micSourceRef.current) {
+        try {
+          const mSrc = ctx.createMediaStreamSource(micStreamRef.current);
+          mSrc.connect(micHighpass);
+          micSourceRef.current = mSrc;
+        } catch {
+          // ignore duplicate mic source hookup
+        }
       }
 
       audioCtxRef.current = ctx;
@@ -424,6 +683,44 @@ export default function App() {
       gainNodeRef.current = gainNode;
       filtersRef.current = filters;
       setAnalyser(analyserNode);
+    } else {
+      if (
+        videoRef.current &&
+        !videoSourceCreatedRef.current &&
+        firstFilterOrGainRef.current
+      ) {
+        try {
+          const vSource = audioCtxRef.current.createMediaElementSource(videoRef.current);
+          vSource.connect(firstFilterOrGainRef.current);
+          videoSourceCreatedRef.current = true;
+        } catch {
+          // ignore
+        }
+      }
+
+      if (
+        customBgVideoRef.current &&
+        !customBgSourceCreatedRef.current &&
+        customBgGainRef.current
+      ) {
+        try {
+          const bgSource = audioCtxRef.current.createMediaElementSource(customBgVideoRef.current);
+          bgSource.connect(customBgGainRef.current);
+          customBgSourceCreatedRef.current = true;
+        } catch {
+          // ignore
+        }
+      }
+
+      if (micStreamRef.current && !micSourceRef.current && micGainRef.current) {
+        try {
+          const mSrc = audioCtxRef.current.createMediaStreamSource(micStreamRef.current);
+          mSrc.connect(micHighpassRef.current ?? micGainRef.current);
+          micSourceRef.current = mSrc;
+        } catch {
+          // ignore
+        }
+      }
     }
 
     if (audioCtxRef.current.state === 'suspended') {
@@ -448,10 +745,75 @@ export default function App() {
         const next = Math.floor(Math.random() * PALETTES.length);
         return next === prev ? (prev + 1) % PALETTES.length : next;
       });
+      setCarouselResetTick((tick) => tick + 1);
       trackEvent('visualizer_randomize', { mix_enabled: useMix });
     },
     [mixEnabled]
   );
+
+  const handleSelectVizModeOrCarousel = useCallback(
+    (id: number) => {
+      if (id === VIZ_CAROUSEL_MODE_ID) {
+        setIsCarouselMode(true);
+        try {
+          localStorage.setItem(STORAGE_CAROUSEL_MODE_KEY, 'true');
+        } catch {
+          // ignore storage errors
+        }
+        randomizeVisual();
+        showToast(studioT.carouselEnabledToast(carouselIntervalSec), 'info');
+        trackEvent('visualizer_mode_change', {
+          mode_id: VIZ_CAROUSEL_MODE_ID,
+          mode_label: 'Carousel',
+          interval_sec: carouselIntervalSec,
+        });
+        return;
+      }
+
+      setIsCarouselMode(false);
+      try {
+        localStorage.setItem(STORAGE_CAROUSEL_MODE_KEY, 'false');
+      } catch {
+        // ignore storage errors
+      }
+      setVizMode(id);
+      trackEvent('visualizer_mode_change', {
+        mode_id: id,
+        mode_label: VIZ_MODES[id]?.label,
+      });
+    },
+    [carouselIntervalSec, randomizeVisual, showToast, studioT]
+  );
+
+  const handleChangeCarouselInterval = useCallback(
+    (sec: number) => {
+      setCarouselIntervalSec(sec);
+      setCarouselResetTick((tick) => tick + 1);
+      try {
+        localStorage.setItem(STORAGE_CAROUSEL_INTERVAL_KEY, String(sec));
+      } catch {
+        // ignore storage errors
+      }
+      showToast(studioT.carouselIntervalToast(sec), 'info');
+      trackEvent('visualizer_carousel_interval', { interval_sec: sec });
+    },
+    [showToast, studioT]
+  );
+
+  useEffect(() => {
+    if (!isCarouselMode || (!isPlaying && !isRecording)) return;
+    const id = window.setInterval(() => {
+      randomizeVisual();
+    }, carouselIntervalSec * 1000);
+    return () => window.clearInterval(id);
+  }, [
+    carouselIntervalSec,
+    carouselResetTick,
+    isCarouselMode,
+    isPlaying,
+    isRecording,
+    randomizeVisual,
+  ]);
 
   const toggleMixEnabled = useCallback(() => {
     setMixEnabled((prev) => {
@@ -517,6 +879,14 @@ export default function App() {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
+  useEffect(() => {
+    isRecordArmedRef.current = isRecordArmed;
+  }, [isRecordArmed]);
+
+  useEffect(() => {
+    isStudioModeRef.current = isStudioMode;
+  }, [isStudioMode]);
+
   const persistCurrentSession = useCallback(
     (overrides?: Partial<SavedPlaybackSession>) => {
       const active = activeSessionRef.current;
@@ -525,10 +895,11 @@ export default function App() {
       const list = playlistRef.current;
       const idx = overrides?.trackIndex ?? currentIndexRef.current;
       const track = list[idx];
-      const audioTime = audioRef.current?.currentTime;
+      const activeEl = track?.mediaType === 'video' ? videoRef.current : audioRef.current;
+      const mediaTime = activeEl?.currentTime;
       const resolvedTime =
         overrides?.currentTime ??
-        (typeof audioTime === 'number' && Number.isFinite(audioTime) ? audioTime : 0);
+        (typeof mediaTime === 'number' && Number.isFinite(mediaTime) ? mediaTime : 0);
 
       savePlaybackSession({
         sourceType: overrides?.sourceType ?? active!.sourceType,
@@ -575,13 +946,177 @@ export default function App() {
 
   // Sync volume
   useEffect(() => {
+    const level = isMuted ? 0 : volume;
     if (gainNodeRef.current) {
-      gainNodeRef.current.gain.value = isMuted ? 0 : volume;
+      gainNodeRef.current.gain.value = level;
     }
     if (audioRef.current) {
-      audioRef.current.volume = isMuted ? 0 : volume;
+      audioRef.current.volume = level;
+    }
+    if (videoRef.current) {
+      videoRef.current.volume = level;
     }
   }, [volume, isMuted]);
+
+  // Keep customStageMediaRef, cameraOverlayActiveRef and custom background video/camera stream synced
+  useEffect(() => {
+    customStageMediaRef.current = customStageMedia;
+    cameraOverlayActiveRef.current = cameraOverlayActive;
+    const camVid = cameraVideoRef.current;
+    const vid = customBgVideoRef.current;
+    const wantCamera = customStageMedia?.kind === 'camera' || cameraOverlayActive;
+
+    if (camVid) {
+      if (wantCamera) {
+        camVid.muted = true;
+        if (cameraStreamRef.current && camVid.srcObject !== cameraStreamRef.current) {
+          camVid.srcObject = cameraStreamRef.current;
+        }
+        if (cameraStreamRef.current) {
+          void camVid.play().catch(() => {});
+        }
+      } else if (camVid.srcObject) {
+        camVid.srcObject = null;
+      }
+    }
+
+    if (customStageMedia?.kind === 'camera') {
+      if (vid) {
+        vid.pause();
+        if (vid.hasAttribute('src')) {
+          vid.removeAttribute('src');
+          vid.load();
+        }
+      }
+      if (customBgGainRef.current) {
+        customBgGainRef.current.gain.value = 0;
+      }
+      return;
+    }
+
+    if (!vid) return;
+    if (vid.srcObject) {
+      vid.srcObject = null;
+    }
+
+    if (!customStageMedia || customStageMedia.kind !== 'video') {
+      vid.pause();
+      if (vid.hasAttribute('src')) {
+        vid.removeAttribute('src');
+        vid.load();
+      }
+      if (customBgGainRef.current) {
+        customBgGainRef.current.gain.value = 0;
+      }
+      return;
+    }
+
+    const sameSrc =
+      vid.getAttribute('src') === customStageMedia.src || vid.src === customStageMedia.src;
+    if (!sameSrc) {
+      if (customStageMedia.src.startsWith('http')) {
+        vid.crossOrigin = 'anonymous';
+      } else {
+        vid.removeAttribute('crossorigin');
+      }
+      vid.preload = 'auto';
+      vid.loop = stageMediaQueue.length <= 1;
+      vid.src = customStageMedia.src;
+      vid.load();
+    } else {
+      vid.loop = stageMediaQueue.length <= 1;
+    }
+
+    const activeTrackType = playlistRef.current[currentIndexRef.current]?.mediaType;
+    const isAudioMode = activeTrackType !== 'video' && activeTrackType !== 'image';
+    const shouldHear = customStageMedia.soundEnabled && !isMuted;
+
+    vid.muted = !shouldHear;
+    if (customBgGainRef.current) {
+      customBgGainRef.current.gain.value = shouldHear ? customStageMedia.soundVolume : 0;
+      vid.volume = 1;
+    } else {
+      vid.volume = shouldHear ? customStageMedia.soundVolume : 0;
+    }
+
+    let cancelled = false;
+    const unlockUnmutedOnGesture = () => {
+      if (cancelled) return;
+      ensureAudioGraph();
+      const latest = customStageMediaRef.current;
+      if (latest?.kind === 'video') {
+        vid.muted = !(latest.soundEnabled && !isMuted);
+      }
+    };
+
+    if (isAudioMode && (isPlaying || isRecording)) {
+      void vid.play().catch(() => {
+        if (cancelled) return;
+        // Mobile browsers often block unmuted play outside direct click after OS file dialog: play muted immediately so video renders, then unmute on next tap
+        vid.muted = true;
+        void vid.play().catch(() => {});
+        if (shouldHear) {
+          window.addEventListener('pointerdown', unlockUnmutedOnGesture, { once: true });
+        }
+      });
+    } else {
+      vid.pause();
+      if (vid.readyState < 2) {
+        const primeFrame = () => {
+          if (cancelled || isPlayingRef.current) return;
+          const prevMuted = vid.muted;
+          vid.muted = true;
+          void vid
+            .play()
+            .then(() => {
+              if (!isPlayingRef.current) {
+                vid.pause();
+              }
+              vid.muted = prevMuted;
+            })
+            .catch(() => {
+              vid.muted = prevMuted;
+              if (vid.currentTime < 0.01) {
+                try {
+                  vid.currentTime = 0.01;
+                } catch {
+                  // ignore seek errors
+                }
+              }
+            });
+        };
+        if (vid.readyState >= 1) {
+          primeFrame();
+        } else {
+          vid.addEventListener('loadedmetadata', primeFrame, { once: true });
+        }
+      }
+    }
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('pointerdown', unlockUnmutedOnGesture);
+    };
+  }, [
+    cameraOverlayActive,
+    customStageMedia,
+    ensureAudioGraph,
+    isMuted,
+    isPlaying,
+    isRecording,
+    stageMediaQueue.length,
+    currentIndex,
+    playlist,
+  ]);
+
+  // Keep live microphone refs & gain synced
+  useEffect(() => {
+    micEnabledRef.current = micEnabled;
+    micVolumeRef.current = micVolume;
+    if (micGainRef.current) {
+      micGainRef.current.gain.value = micEnabled ? micVolume : 0;
+    }
+  }, [micEnabled, micVolume]);
 
   // Sync EQ bands
   useEffect(() => {
@@ -609,15 +1144,126 @@ export default function App() {
     }
   }, []);
 
+  const getActiveMediaElement = useCallback(
+    (trackOverride?: Track | null): HTMLMediaElement | null => {
+      const target = trackOverride ?? playlistRef.current[currentIndexRef.current] ?? null;
+      if (target?.mediaType === 'video') {
+        return videoRef.current;
+      }
+      return audioRef.current;
+    },
+    []
+  );
+
+  const loadTrackIntoMediaElements = useCallback((track: Track | undefined, seekTime = 0) => {
+    const audioEl = audioRef.current;
+    const videoEl = videoRef.current;
+    if (!track) return;
+
+    if (track.mediaType === 'video') {
+      if (audioEl) {
+        audioEl.pause();
+        audioEl.removeAttribute('src');
+      }
+      const keepStudio = isRecordArmedRef.current;
+      isStudioModeRef.current = keepStudio;
+      setIsStudioMode(keepStudio);
+      setUiVisible(true);
+      if (videoEl) {
+        videoEl.pause();
+        const sameSrc =
+          Boolean(videoEl.src) &&
+          (videoEl.src === track.src || videoEl.currentSrc === track.src);
+        if (sameSrc) {
+          try {
+            videoEl.currentTime = Math.max(0, seekTime);
+          } catch {
+            // ignore
+          }
+        } else {
+          if (seekTime > 0) {
+            pendingSeekRef.current = { src: track.src, time: seekTime };
+          }
+          videoEl.src = track.src;
+        }
+      }
+    } else if (track.mediaType === 'image') {
+      if (videoEl) {
+        videoEl.pause();
+        if (videoEl.hasAttribute('src')) {
+          videoEl.removeAttribute('src');
+          videoEl.load();
+        }
+      }
+      if (audioEl) {
+        audioEl.pause();
+        audioEl.removeAttribute('src');
+      }
+      imageElapsedRef.current = Math.max(0, Math.min(IMAGE_SLIDE_DURATION_SEC, seekTime));
+      setCurrentTime(imageElapsedRef.current);
+      setDuration(IMAGE_SLIDE_DURATION_SEC);
+      isStudioModeRef.current = true;
+      setIsStudioMode(true);
+      setUiVisible(true);
+    } else {
+      if (videoEl) {
+        videoEl.pause();
+        if (videoEl.hasAttribute('src')) {
+          videoEl.removeAttribute('src');
+          videoEl.load();
+        }
+      }
+      const hasFullscreenBackdropOnly = Boolean(
+        customStageMediaRef.current &&
+          customStageMediaRef.current.displayMode === 'backdrop' &&
+          !cameraOverlayActiveRef.current
+      );
+      const keepFrameStudio =
+        cameraOverlayActiveRef.current ||
+        customStageMediaRef.current?.displayMode === 'frame' ||
+        (isRecordArmedRef.current && !hasFullscreenBackdropOnly);
+      isStudioModeRef.current = keepFrameStudio;
+      setIsStudioMode(keepFrameStudio);
+      if (keepFrameStudio || isRecordArmedRef.current) {
+        setUiVisible(true);
+      }
+      if (audioEl) {
+        audioEl.pause();
+        const sameSrc =
+          Boolean(audioEl.src) &&
+          (audioEl.src === track.src || audioEl.currentSrc === track.src);
+        if (sameSrc) {
+          try {
+            audioEl.currentTime = Math.max(0, seekTime);
+          } catch {
+            // ignore
+          }
+        } else {
+          if (seekTime > 0) {
+            pendingSeekRef.current = { src: track.src, time: seekTime };
+          }
+          audioEl.src = track.src;
+        }
+      }
+    }
+  }, []);
+
   const startPlaybackSafe = useCallback(
-    async (withAudioGraph: boolean) => {
-      const audioEl = audioRef.current;
-      if (!audioEl) return false;
+    async (withAudioGraph: boolean, trackOverride?: Track | null) => {
+      const target = trackOverride ?? playlistRef.current[currentIndexRef.current] ?? null;
+      if (target?.mediaType === 'image') {
+        if (withAudioGraph) ensureAudioGraph();
+        setIsPlaying(true);
+        setAwaitingAutoplayUnlock(false);
+        return true;
+      }
+      const mediaEl = getActiveMediaElement(target);
+      if (!mediaEl) return false;
       if (withAudioGraph) {
         ensureAudioGraph();
       }
       try {
-        await audioEl.play();
+        await mediaEl.play();
         setIsPlaying(true);
         setAwaitingAutoplayUnlock(false);
         return true;
@@ -626,7 +1272,7 @@ export default function App() {
         return false;
       }
     },
-    [ensureAudioGraph]
+    [ensureAudioGraph, getActiveMediaElement]
   );
 
   // Unlock AudioContext & start playback on first user gesture if autoplay was blocked
@@ -638,14 +1284,15 @@ export default function App() {
         return;
       }
       ensureAudioGraph();
-      if (audioRef.current && audioRef.current.src) {
-        void audioRef.current
+      const mediaEl = getActiveMediaElement();
+      if (mediaEl && mediaEl.src) {
+        void mediaEl
           .play()
           .then(() => {
             setIsPlaying(true);
             setAwaitingAutoplayUnlock(false);
             persistCurrentSession({
-              currentTime: audioRef.current?.currentTime ?? 0,
+              currentTime: mediaEl.currentTime ?? 0,
               wasPlaying: true,
             });
           })
@@ -658,7 +1305,7 @@ export default function App() {
       window.removeEventListener('pointerdown', unlock);
       window.removeEventListener('keydown', unlock);
     };
-  }, [awaitingAutoplayUnlock, ensureAudioGraph, persistCurrentSession]);
+  }, [awaitingAutoplayUnlock, ensureAudioGraph, getActiveMediaElement, persistCurrentSession]);
 
   // Attach FFT analyser on first interaction if autoplay succeeded automatically
   useEffect(() => {
@@ -688,10 +1335,17 @@ export default function App() {
       setLoadError(null);
       pendingSeekRef.current = null;
       try {
-        const { tracks, resolvedHandle } = await fetchAudiusProfileTracks(handle);
+        const { tracks: fetchedTracks, resolvedHandle } = await fetchAudiusProfileTracks(handle);
         revokeLocalObjectUrls();
 
-        const { index, seekTime } = resolveRestoreTarget(tracks, options?.restore);
+        const shouldShuffleOnLaunch = Boolean(options?.isInitial);
+        const tracks = shouldShuffleOnLaunch
+          ? shuffleTracksArray(fetchedTracks)
+          : fetchedTracks;
+
+        const { index, seekTime } = shouldShuffleOnLaunch
+          ? { index: 0, seekTime: 0 }
+          : resolveRestoreTarget(tracks, options?.restore);
         const targetTrack = tracks[index];
 
         playlistRef.current = tracks;
@@ -714,14 +1368,17 @@ export default function App() {
           randomizeVisual();
         }
 
-        if (audioRef.current && targetTrack) {
-          audioRef.current.pause();
-          if (seekTime > 0) {
-            pendingSeekRef.current = { src: targetTrack.src, time: seekTime };
-          }
-          audioRef.current.src = targetTrack.src;
+        if (targetTrack) {
+          loadTrackIntoMediaElements(targetTrack, seekTime);
         }
 
+        if (!options?.isInitial) {
+          try {
+            localStorage.setItem(STORAGE_MANUAL_AUDIUS_KEY, '1');
+          } catch {
+            // ignore
+          }
+        }
         saveProfileToHistory(resolvedHandle);
         trackEvent('source_audius_load', {
           handle: resolvedHandle,
@@ -732,7 +1389,7 @@ export default function App() {
 
         let started = false;
         if (options?.autoPlay) {
-          started = await startPlaybackSafe(!options.isInitial);
+          started = await startPlaybackSafe(!options.isInitial, targetTrack);
           if (started) {
             if (!options.isInitial) {
               showToast(t.audiusPlayingToast(resolvedHandle, tracks.length), 'success');
@@ -758,7 +1415,44 @@ export default function App() {
           wasPlaying: started,
         });
       } catch (err) {
-        if (options?.isInitial && typeof navigator !== 'undefined' && !navigator.onLine) {
+        const isBrowserOnline =
+          typeof navigator === 'undefined' ? true : navigator.onLine;
+        if (options?.isInitial && FALLBACK_RADIO_STREAM_URL && isBrowserOnline) {
+          const radioTrack: Track = {
+            id: 'radio-fm-fallback',
+            title: 'RadioFM',
+            artist: 'Capital London',
+            cover: DEFAULT_COVER_IMAGE,
+            src: FALLBACK_RADIO_STREAM_URL,
+            sourceName: 'RadioFM',
+            mediaType: 'audio',
+            isRadio: true,
+          };
+          revokeLocalObjectUrls();
+          playlistRef.current = [radioTrack];
+          currentIndexRef.current = 0;
+          initialRestoreConsumedRef.current = true;
+          activeSessionRef.current = {
+            sourceType: 'url',
+            url: FALLBACK_RADIO_STREAM_URL,
+          };
+          setPendingFolderRestore(null);
+          setPlaylist([radioTrack]);
+          setCurrentIndex(0);
+          setCurrentTime(0);
+          setDuration(0);
+          setActiveFolderId(null);
+          setActiveUrlId(null);
+          setLoadError(null);
+          loadTrackIntoMediaElements(radioTrack, 0);
+          if (options?.autoPlay) {
+            const started = await startPlaybackSafe(false, radioTrack);
+            if (!started) {
+              setAwaitingAutoplayUnlock(true);
+            }
+          }
+          trackEvent('source_radio_fallback', { handle });
+        } else if (options?.isInitial && !isBrowserOnline) {
           setLoadError(null);
         } else {
           const msg = err instanceof Error ? err.message : t.audiusErrorFallback;
@@ -820,13 +1514,10 @@ export default function App() {
 
         let started = false;
         const shouldPlay = options?.autoPlay ?? true;
-        if (audioRef.current && targetTrack) {
-          if (seekTime > 0) {
-            pendingSeekRef.current = { src: targetTrack.src, time: seekTime };
-          }
-          audioRef.current.src = targetTrack.src;
+        if (targetTrack) {
+          loadTrackIntoMediaElements(targetTrack, seekTime);
           if (shouldPlay) {
-            started = await startPlaybackSafe(!options?.isInitial);
+            started = await startPlaybackSafe(!options?.isInitial, targetTrack);
             if (!started) {
               setAwaitingAutoplayUnlock(true);
             }
@@ -872,6 +1563,7 @@ export default function App() {
       folderName: string,
       options?: {
         saveHandle?: FileSystemDirectoryHandle;
+        persistFiles?: boolean;
         restore?: RestoreOptions;
         closeModal?: boolean;
         autoPlay?: boolean;
@@ -882,7 +1574,7 @@ export default function App() {
       const sortedFiles = [...files].sort((a, b) => {
         const relA = (a.webkitRelativePath || a.name).toLowerCase();
         const relB = (b.webkitRelativePath || b.name).toLowerCase();
-        return relA.localeCompare(relB);
+        return relA.localeCompare(relB, undefined, { numeric: true, sensitivity: 'base' });
       });
 
       setIsParsingFiles(true);
@@ -893,24 +1585,47 @@ export default function App() {
 
         for (let i = 0; i < sortedFiles.length; i++) {
           const file = sortedFiles[i];
-          const audioUrl = URL.createObjectURL(file);
-          newObjectUrls.push(audioUrl);
-          const tags = await parseAudioMetadata(file);
-          if (tags.coverUrl) newObjectUrls.push(tags.coverUrl);
+          const isVideo =
+            file.type.startsWith('video/') || /\.(mp4|webm|mov|m4v)$/i.test(file.name);
+          const isImage =
+            file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif)$/i.test(file.name);
+          const mediaType: MediaKind = isVideo ? 'video' : isImage ? 'image' : 'audio';
+
+          const mediaUrl = URL.createObjectURL(file);
+          newObjectUrls.push(mediaUrl);
+
+          let title = file.name.replace(/\.[^/.]+$/, '');
+          let artist = folderName;
+          let cover = isImage ? mediaUrl : DEFAULT_COVER_IMAGE;
+
+          if (mediaType === 'audio') {
+            const tags = await parseAudioMetadata(file);
+            if (tags.coverUrl) {
+              newObjectUrls.push(tags.coverUrl);
+              cover = tags.coverUrl;
+            }
+            if (tags.title) title = tags.title;
+            if (tags.artist) artist = tags.artist;
+          }
 
           parsedTracks.push({
             id: `local-${folderId}-${i}-${file.name}-${file.size}`,
-            title: tags.title || file.name.replace(/\.[^/.]+$/, ''),
-            artist: tags.artist || folderName,
-            cover: tags.coverUrl || DEFAULT_COVER_IMAGE,
-            src: audioUrl,
+            title,
+            artist,
+            cover,
+            src: mediaUrl,
+            durationHint: isImage ? IMAGE_SLIDE_DURATION_SEC : undefined,
             sourceName: `${t.folderPrefix}: ${folderName}`,
+            mediaType,
             isObjectUrl: true,
           });
         }
 
         if (options?.saveHandle) {
           await saveDirectoryHandle(folderId, options.saveHandle);
+        }
+        if (options?.persistFiles !== false) {
+          await saveFolderFiles(folderId, sortedFiles);
         }
 
         objectUrlsRef.current.push(...newObjectUrls);
@@ -950,7 +1665,7 @@ export default function App() {
         setPlaylist(parsedTracks);
         setCurrentIndex(index);
         setCurrentTime(seekTime);
-        setDuration(0);
+        setDuration(targetTrack?.durationHint ?? 0);
         setLoadError(null);
         setActiveFolderId(folderId);
         setActiveUrlId(null);
@@ -971,13 +1686,10 @@ export default function App() {
 
         let started = false;
         const shouldPlay = options?.autoPlay ?? true;
-        if (audioRef.current && targetTrack) {
-          if (seekTime > 0) {
-            pendingSeekRef.current = { src: targetTrack.src, time: seekTime };
-          }
-          audioRef.current.src = targetTrack.src;
+        if (targetTrack) {
+          loadTrackIntoMediaElements(targetTrack, seekTime);
           if (shouldPlay) {
-            started = await startPlaybackSafe(!options?.isInitial);
+            started = await startPlaybackSafe(!options?.isInitial, targetTrack);
             if (!started) {
               setAwaitingAutoplayUnlock(true);
             }
@@ -1001,18 +1713,33 @@ export default function App() {
           track_count: parsedTracks.length,
         });
         if (!options?.isInitial) {
-          showToast(
-            options?.toastType === 'opened'
-              ? t.folderOpenedToast(folderName)
-              : t.folderLoadedToast(folderName, parsedTracks.length),
-            'success'
-          );
+          if (targetTrack?.mediaType === 'video') {
+            showToast(studioT.videoLoadedToast(targetTrack.title), 'info');
+          } else if (targetTrack?.mediaType === 'image') {
+            showToast(studioT.imageLoadedToast(targetTrack.title), 'success');
+          } else {
+            showToast(
+              options?.toastType === 'opened'
+                ? t.folderOpenedToast(folderName)
+                : t.folderLoadedToast(folderName, parsedTracks.length),
+              'success'
+            );
+          }
         }
       } finally {
         setIsParsingFiles(false);
       }
     },
-    [autoVisualPerTrack, persistCurrentSession, randomizeVisual, showToast, startPlaybackSafe, t]
+    [
+      autoVisualPerTrack,
+      loadTrackIntoMediaElements,
+      persistCurrentSession,
+      randomizeVisual,
+      showToast,
+      startPlaybackSafe,
+      studioT,
+      t,
+    ]
   );
 
   const handleSelectDirectoryPicker = useCallback(async () => {
@@ -1065,7 +1792,11 @@ export default function App() {
     async (fileList: FileList | null) => {
       if (!fileList || fileList.length === 0) return;
       const files = Array.from(fileList).filter(
-        (f) => f.type.startsWith('audio/') || /\.(mp3|flac|wav|ogg|m4a|aac)$/i.test(f.name)
+        (f) =>
+          f.type.startsWith('audio/') ||
+          f.type.startsWith('video/') ||
+          f.type.startsWith('image/') ||
+          /\.(mp3|flac|wav|ogg|m4a|aac|mp4|webm|mov|m4v|jpg|jpeg|png|webp|gif)$/i.test(f.name)
       );
 
       if (files.length === 0) {
@@ -1136,12 +1867,9 @@ export default function App() {
 
         if (autoVisualPerTrack) randomizeVisual();
         let started = false;
-        if (audioRef.current && targetTrack) {
-          if (seekTime > 0) {
-            pendingSeekRef.current = { src: targetTrack.src, time: seekTime };
-          }
-          audioRef.current.src = targetTrack.src;
-          started = await startPlaybackSafe(true);
+        if (targetTrack) {
+          loadTrackIntoMediaElements(targetTrack, seekTime);
+          started = await startPlaybackSafe(true, targetTrack);
         }
         persistCurrentSession({
           sourceType: 'folder',
@@ -1158,25 +1886,51 @@ export default function App() {
         return;
       }
 
-      const dirHandle = await getDirectoryHandle(folder.id);
-      if (dirHandle) {
-        const files = await readAudioFilesFromDirectoryHandle(dirHandle);
-        if (files.length > 0) {
-          await loadParsedAudioFiles(files, folder.id, folder.name, {
-            saveHandle: dirHandle,
-            restore: matchingPending,
-            closeModal: true,
-            autoPlay: true,
-            toastType: 'opened',
-          });
-          return;
+      const idbFiles = await getFolderFiles(folder.id);
+      if (idbFiles && idbFiles.length > 0) {
+        await loadParsedAudioFiles(idbFiles, folder.id, folder.name, {
+          restore: matchingPending,
+          closeModal: true,
+          autoPlay: true,
+          toastType: 'opened',
+          persistFiles: false,
+        });
+        return;
+      }
+
+      try {
+        const dirHandle = await getDirectoryHandle(folder.id);
+        if (dirHandle) {
+          const files = await readAudioFilesFromDirectoryHandle(dirHandle);
+          if (files.length > 0) {
+            await loadParsedAudioFiles(files, folder.id, folder.name, {
+              saveHandle: dirHandle,
+              restore: matchingPending,
+              closeModal: true,
+              autoPlay: true,
+              toastType: 'opened',
+            });
+            return;
+          }
         }
+      } catch {
+        // Permission denied or handle revoked; fall through to reselect prompt
       }
 
       showToast(t.reselectFolderToast(folder.name), 'info');
+      if (
+        typeof window !== 'undefined' &&
+        'showDirectoryPicker' in window &&
+        window.self === window.top
+      ) {
+        void handleSelectDirectoryPicker();
+      } else {
+        reselectFolderInputRef.current?.click();
+      }
     },
     [
       autoVisualPerTrack,
+      handleSelectDirectoryPicker,
       loadParsedAudioFiles,
       pendingFolderRestore,
       persistCurrentSession,
@@ -1250,13 +2004,10 @@ export default function App() {
 
         let started = false;
         const shouldPlay = options?.autoPlay ?? true;
-        if (audioRef.current && targetTrack) {
-          if (seekTime > 0) {
-            pendingSeekRef.current = { src: targetTrack.src, time: seekTime };
-          }
-          audioRef.current.src = targetTrack.src;
+        if (targetTrack) {
+          loadTrackIntoMediaElements(targetTrack, seekTime);
           if (shouldPlay) {
-            started = await startPlaybackSafe(!options?.isInitial);
+            started = await startPlaybackSafe(!options?.isInitial, targetTrack);
             if (!started) {
               setAwaitingAutoplayUnlock(true);
             }
@@ -1418,15 +2169,25 @@ export default function App() {
       return;
     }
 
+    const browserDefaultHandle = getDefaultAudiusHandleForBrowser();
+    const useManualAudius = isManualAudiusSelection();
     const targetHandle =
       session?.sourceType === 'audius' && session.audiusHandle
-        ? session.audiusHandle
-        : currentHandle || DEFAULT_AUDIUS_HANDLE;
+        ? useManualAudius
+          ? session.audiusHandle
+          : browserDefaultHandle
+        : currentHandle || browserDefaultHandle;
+    const effectiveRestore =
+      session?.sourceType === 'audius' &&
+      session.audiusHandle &&
+      session.audiusHandle.toLowerCase() !== targetHandle.toLowerCase()
+        ? undefined
+        : restore;
 
     void loadAudiusTracks(targetHandle, {
       autoPlay: session ? session.wasPlaying !== false : true,
       isInitial: true,
-      restore,
+      restore: effectiveRestore,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1457,11 +2218,21 @@ export default function App() {
           restore,
         });
       } else if (!session || session.sourceType === 'audius') {
-        const targetHandle = session?.audiusHandle || currentHandle || DEFAULT_AUDIUS_HANDLE;
+        const browserDefaultHandle = getDefaultAudiusHandleForBrowser();
+        const useManualAudius = isManualAudiusSelection();
+        const targetHandle =
+          session?.audiusHandle && useManualAudius
+            ? session.audiusHandle
+            : browserDefaultHandle;
+        const effectiveRestore =
+          session?.audiusHandle &&
+          session.audiusHandle.toLowerCase() !== targetHandle.toLowerCase()
+            ? undefined
+            : restore;
         void loadAudiusTracks(targetHandle, {
           autoPlay: false,
           isInitial: true,
-          restore,
+          restore: effectiveRestore,
         });
       }
     }
@@ -1479,19 +2250,30 @@ export default function App() {
     (target: ConfirmDeleteTarget) => {
       trackEvent('source_delete', { source_type: target.type });
       if (target.type === 'audius') {
-        setSavedProfiles((prev) => {
-          const next = prev.filter((p) => p !== target.id);
+        const deletedLower = target.id.toLowerCase();
+        const nextProfiles = savedProfiles.filter((p) => p.toLowerCase() !== deletedLower);
+        setSavedProfiles(nextProfiles);
+        try {
+          localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(nextProfiles));
+        } catch {
+          // ignore
+        }
+        if (currentHandle.toLowerCase() === deletedLower) {
+          const fallbackHandle = nextProfiles[0] ?? getDefaultAudiusHandleForBrowser();
+          setCurrentHandle(fallbackHandle);
           try {
-            localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(next));
+            localStorage.removeItem(STORAGE_HANDLE_KEY);
+            localStorage.removeItem(STORAGE_MANUAL_AUDIUS_KEY);
+            localStorage.removeItem('yritmx_playback_session');
           } catch {
             // ignore
           }
-          return next;
-        });
+        }
         showToast(t.profileRemovedToast(target.label), 'info');
       } else if (target.type === 'folder') {
         folderCacheRef.current.delete(target.id);
         void deleteDirectoryHandle(target.id);
+        void deleteFolderFiles(target.id);
         setSavedFolders((prev) => {
           const next = prev.filter((f) => f.id !== target.id);
           try {
@@ -1517,37 +2299,42 @@ export default function App() {
         showToast(t.urlRemovedToast(target.label), 'info');
       }
     },
-    [activeFolderId, activeUrlId, showToast, t]
+    [activeFolderId, activeUrlId, currentHandle, savedProfiles, showToast, t]
   );
 
   const selectTrack = useCallback(
-    async (index: number, autoPlay = true) => {
+    async (index: number, autoPlay = true, keepRecording = false) => {
       if (index < 0 || index >= playlist.length) return;
+      if (!keepRecording && isRecordingRef.current && mediaRecorderRef.current?.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
       const track = playlist[index];
+      const sameSingleTrackLoop =
+        playlist.length === 1 && index === currentIndexRef.current && isStudioModeRef.current;
       pendingSeekRef.current = null;
       currentIndexRef.current = index;
       setCurrentIndex(index);
       setCurrentTime(0);
-      setDuration(track.durationHint ?? 0);
+      setDuration(track.mediaType === 'image' ? IMAGE_SLIDE_DURATION_SEC : track.durationHint ?? 0);
       trackEvent('track_select', {
         track_title: track.title,
         artist: track.artist,
         index,
       });
 
-      if (autoVisualPerTrack) {
+      if (autoVisualPerTrack && !sameSingleTrackLoop) {
         randomizeVisual();
       }
 
-      const audioEl = audioRef.current;
-      if (!audioEl) return;
-      audioEl.src = track.src;
+      loadTrackIntoMediaElements(track, 0);
 
       let started = false;
       if (autoPlay) {
-        started = await startPlaybackSafe(true);
+        started = await startPlaybackSafe(true, track);
         if (!started) {
           showToast(t.pressPlayToast, 'info');
+        } else if (track.mediaType === 'video' && !isStudioModeRef.current && !sameSingleTrackLoop) {
+          showToast(studioT.videoLoadedToast(track.title), 'info');
         }
       }
 
@@ -1562,31 +2349,425 @@ export default function App() {
     },
     [
       autoVisualPerTrack,
+      loadTrackIntoMediaElements,
       persistCurrentSession,
       playlist,
       randomizeVisual,
       showToast,
       startPlaybackSafe,
+      studioT,
       t,
     ]
   );
 
-  const togglePlay = useCallback(async () => {
-    const audioEl = audioRef.current;
-    if (!audioEl) return;
+  const stopStudioRecording = useCallback(() => {
+    if (offlineAbortRef.current) {
+      offlineAbortRef.current.abort();
+      offlineAbortRef.current = null;
+    }
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state === 'recording') {
+      recorder.stop();
+    }
+    const activeEl = getActiveMediaElement();
+    if (activeEl && !activeEl.paused) {
+      activeEl.pause();
+    }
+    if (
+      customStageMediaRef.current?.kind === 'video' &&
+      customBgVideoRef.current &&
+      !customBgVideoRef.current.paused
+    ) {
+      customBgVideoRef.current.pause();
+    }
+    isRecordingRef.current = false;
+    setIsRecording(false);
+    setIsPlaying(false);
+  }, [getActiveMediaElement]);
 
+  const startLiveMediaRecording = useCallback(async () => {
+    if (isRecordingRef.current) return;
+    if (playlistRef.current.length === 0) {
+      await handleTriggerDemo();
+    }
+    const canvas = masterCanvasRef.current as
+      | (HTMLCanvasElement & { captureStream?: (frameRate?: number) => MediaStream })
+      | null;
+    if (!canvas || typeof MediaRecorder === 'undefined' || typeof canvas.captureStream !== 'function') {
+      showToast(studioT.recordUnsupportedToast, 'error');
+      isRecordArmedRef.current = false;
+      setIsRecordArmed(false);
+      return;
+    }
+
+    const activeTrack = playlistRef.current[currentIndexRef.current] ?? null;
+    const mediaEl = activeTrack?.mediaType === 'image' ? null : getActiveMediaElement(activeTrack);
+    if (!mediaEl && activeTrack?.mediaType !== 'image') {
+      showToast(studioT.recordErrorToast, 'error');
+      return;
+    }
+
+    ensureAudioGraph();
+    if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+      try {
+        await audioCtxRef.current.resume();
+      } catch {
+        // ignore resume error
+      }
+    }
+
+    if (activeTrack?.mediaType === 'image') {
+      imageElapsedRef.current = 0;
+      setCurrentTime(0);
+      setDuration(IMAGE_SLIDE_DURATION_SEC);
+    } else if (mediaEl) {
+      mediaEl.pause();
+      if (!mediaEl.src && activeTrack) {
+        mediaEl.src = activeTrack.src;
+      }
+      try {
+        mediaEl.currentTime = 0;
+        setCurrentTime(0);
+      } catch {
+        // ignore non-seekable streams
+      }
+    }
+
+    try {
+      const recDims = getRecordingDimensions(recordAspect, recordQuality);
+      if (canvas.width !== recDims.exportWidth || canvas.height !== recDims.exportHeight) {
+        canvas.width = recDims.exportWidth;
+        canvas.height = recDims.exportHeight;
+        const c2d = canvas.getContext('2d');
+        if (c2d) {
+          c2d.setTransform(
+            recDims.exportWidth / recDims.logicalWidth,
+            0,
+            0,
+            recDims.exportHeight / recDims.logicalHeight,
+            0,
+            0
+          );
+        }
+      }
+
+      const canvasStream = canvas.captureStream(30);
+      const audioTracks = streamDestRef.current?.stream.getAudioTracks() ?? [];
+      const combinedStream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...audioTracks,
+      ]);
+
+      const mimeCandidates = [
+        'video/mp4; codecs="avc1.42E01E, mp4a.40.2"',
+        'video/mp4',
+        'video/webm; codecs=vp9,opus',
+        'video/webm; codecs=vp8,opus',
+        'video/webm',
+      ];
+      const chosenMime = mimeCandidates.find((mime) => MediaRecorder.isTypeSupported(mime));
+
+      const recorder = new MediaRecorder(
+        combinedStream,
+        chosenMime
+          ? {
+              mimeType: chosenMime,
+              videoBitsPerSecond: recDims.bitrate,
+              audioBitsPerSecond: 192_000,
+            }
+          : {
+              videoBitsPerSecond: recDims.bitrate,
+              audioBitsPerSecond: 192_000,
+            }
+      );
+
+      recordedChunksRef.current = [];
+      recorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) {
+          recordedChunksRef.current.push(ev.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        canvasStream.getTracks().forEach((tr) => tr.stop());
+        const elapsedSec = Math.max(
+          0.2,
+          (performance.now() - recordingStartPerfRef.current) / 1000
+        );
+        const blobType = chosenMime || recorder.mimeType || 'video/mp4';
+        const rawBlob = new Blob(recordedChunksRef.current, { type: blobType });
+        recordedChunksRef.current = [];
+        mediaRecorderRef.current = null;
+        isRecordingRef.current = false;
+        setIsRecording(false);
+
+        if (rawBlob.size > 0) {
+          const ext = blobType.includes('webm') ? 'webm' : 'mp4';
+          void (async () => {
+            const finalBlob =
+              ext === 'mp4' ? await safeFixMp4(rawBlob, elapsedSec) : rawBlob;
+            const url = URL.createObjectURL(finalBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `yritmx-space-studio.${ext}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+            showToast(studioT.recordSavedToast, 'success');
+            trackEvent('studio_mp4_exported', {
+              mode: 'live',
+              mime_type: blobType,
+              bytes: finalBlob.size,
+              studio_mode: isStudioModeRef.current,
+              aspect: recordAspect,
+              quality: recordQuality,
+            });
+          })();
+        }
+      };
+
+      recorder.onerror = () => {
+        canvasStream.getTracks().forEach((tr) => tr.stop());
+        mediaRecorderRef.current = null;
+        isRecordingRef.current = false;
+        setIsRecording(false);
+        showToast(studioT.recordErrorToast, 'error');
+      };
+
+      mediaRecorderRef.current = recorder;
+      recordingStartPerfRef.current = performance.now();
+      setRecordingElapsedSec(0);
+      recordingStallCheckRef.current = { lastTime: -1, stagnantTicks: 0, recovering: false };
+      isRecordingRef.current = true;
+      setIsRecording(true);
+      recorder.start(250);
+
+      if (mediaEl) {
+        await mediaEl.play();
+      }
+      if (
+        customStageMediaRef.current?.kind === 'video' &&
+        customBgVideoRef.current &&
+        activeTrack?.mediaType !== 'video' &&
+        activeTrack?.mediaType !== 'image'
+      ) {
+        try {
+          customBgVideoRef.current.currentTime = 0;
+        } catch {
+          // ignore
+        }
+        void customBgVideoRef.current.play().catch(() => {});
+      }
+      setIsPlaying(true);
+      showToast(studioT.recordStartedToast, 'info');
+      trackEvent('studio_mp4_record_start', {
+        mode: 'live',
+        media_type: activeTrack?.mediaType || 'audio',
+        studio_mode: isStudioMode,
+        aspect: recordAspect,
+        quality: recordQuality,
+      });
+    } catch {
+      mediaRecorderRef.current = null;
+      isRecordingRef.current = false;
+      setIsRecording(false);
+      showToast(studioT.recordErrorToast, 'error');
+    }
+  }, [
+    ensureAudioGraph,
+    getActiveMediaElement,
+    handleTriggerDemo,
+    isStudioMode,
+    recordAspect,
+    recordQuality,
+    showToast,
+    studioT,
+  ]);
+
+  const startOfflineRenderExport = useCallback(async () => {
+    if (isRecordingRef.current) return;
+    if (playlistRef.current.length === 0) {
+      await handleTriggerDemo();
+    }
+    const tracksSnapshot = playlistRef.current;
+    if (tracksSnapshot.length === 0) {
+      showToast(studioT.recordErrorToast, 'error');
+      return;
+    }
+
+    const cap = await resolveOfflineVideoCapability(recordAspect, recordQuality);
+    if (!cap.supported) {
+      showToast(studioT.offlineUnsupportedFallbackToast, 'info');
+      setRecordRenderMode('live');
+      try {
+        localStorage.setItem(STORAGE_RECORD_RENDER_MODE_KEY, 'live');
+      } catch {
+        // ignore
+      }
+      await startLiveMediaRecording();
+      return;
+    }
+
+    const activeEl = getActiveMediaElement();
+    if (activeEl && !activeEl.paused) {
+      activeEl.pause();
+    }
+    setIsPlaying(false);
+
+    const controller = new AbortController();
+    offlineAbortRef.current = controller;
+    isRecordingRef.current = true;
+    setIsRecording(true);
+    setOfflineExportState({ progress: 0, stage: 'preparing' });
+
+    const isCleanBackdropNow =
+      !cameraOverlayActiveRef.current &&
+      customStageMedia?.displayMode === 'backdrop' &&
+      customStageMedia.backdropOverlay === 'clean';
+    const orbsSnap =
+      !uiVisible &&
+      showOrbs &&
+      !isStudioModeRef.current &&
+      !isCleanBackdropNow &&
+      liveOrbsSnapshotRef.current.length > 0
+        ? liveOrbsSnapshotRef.current
+        : null;
+
+    trackEvent('studio_mp4_record_start', {
+      mode: 'offline',
+      media_type: tracksSnapshot[currentIndexRef.current]?.mediaType || 'audio',
+      studio_mode: isStudioModeRef.current,
+      aspect: recordAspect,
+      quality: recordQuality,
+    });
+
+    try {
+      const result = await exportStudioVideoOffline({
+        tracks: tracksSnapshot,
+        startIndex: currentIndexRef.current,
+        allowMultiSlide: !isShuffle && !isRepeat,
+        imageSlideDurationSec: IMAGE_SLIDE_DURATION_SEC,
+        aspect: recordAspect,
+        quality: recordQuality,
+        vizMode,
+        paletteIndex,
+        visualDna,
+        isCarouselMode,
+        carouselIntervalSec,
+        mixEnabled,
+        isZenMode: !uiVisible,
+        studioActive: isStudioModeRef.current,
+        layeredBg: mixEnabled && visualDna.mixLayers.length > 0,
+        eqGains,
+        volume,
+        isMuted,
+        studioFrameSnapshot: studioFrameStateRef.current,
+        customStageMedia,
+        coverFrameMotion,
+        coverRotationTarget,
+        showCoverCaption,
+        orbSnapshots: orbsSnap,
+        orbViewportWidth: window.innerWidth,
+        orbViewportHeight: window.innerHeight,
+        previewCanvas: null,
+        onProgress: (info) => {
+          setOfflineExportState(info);
+        },
+        signal: controller.signal,
+      });
+
+      const url = URL.createObjectURL(result.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `yritmx-space-studio.${result.fileExtension}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+
+      showToast(
+        studioT.offlineSavedToast(`${result.width}×${result.height}`, result.fps),
+        'success'
+      );
+      trackEvent('studio_mp4_exported', {
+        mode: 'offline',
+        mime_type: 'video/mp4',
+        bytes: result.blob.size,
+        studio_mode: isStudioModeRef.current,
+        aspect: recordAspect,
+        quality: recordQuality,
+      });
+    } catch (err) {
+      if (isExportAbortError(err)) {
+        showToast(studioT.offlineCancelledToast, 'info');
+      } else if (err instanceof OfflineCorsAudioError) {
+        showToast(studioT.offlineCorsFallbackToast, 'error');
+      } else {
+        console.error('[Offline Export Error]', err);
+        showToast(studioT.recordErrorToast, 'error');
+      }
+    } finally {
+      offlineAbortRef.current = null;
+      isRecordingRef.current = false;
+      setIsRecording(false);
+      setOfflineExportState(null);
+    }
+  }, [
+    carouselIntervalSec,
+    coverFrameMotion,
+    coverRotationTarget,
+    customStageMedia,
+    eqGains,
+    getActiveMediaElement,
+    handleTriggerDemo,
+    isCarouselMode,
+    isMuted,
+    isRepeat,
+    isShuffle,
+    mixEnabled,
+    paletteIndex,
+    recordAspect,
+    recordQuality,
+    showCoverCaption,
+    showOrbs,
+    showToast,
+    startLiveMediaRecording,
+    studioT,
+    uiVisible,
+    visualDna,
+    vizMode,
+    volume,
+  ]);
+
+  const startStudioRecording = useCallback(async () => {
+    if (recordRenderMode === 'offline') {
+      await startOfflineRenderExport();
+      return;
+    }
+    await startLiveMediaRecording();
+  }, [recordRenderMode, startLiveMediaRecording, startOfflineRenderExport]);
+
+  const togglePlay = useCallback(async () => {
     if (playlist.length === 0) {
       await handleTriggerDemo();
       return;
     }
 
+    const mediaEl = getActiveMediaElement();
+    if (currentTrack?.mediaType === 'image') {
+      setIsPlaying((p) => !p);
+      return;
+    }
+    if (!mediaEl) return;
+
     ensureAudioGraph();
 
     if (isPlaying) {
-      audioEl.pause();
+      mediaEl.pause();
       setIsPlaying(false);
       persistCurrentSession({
-        currentTime: audioEl.currentTime,
+        currentTime: mediaEl.currentTime,
         wasPlaying: false,
       });
       trackEvent('audio_pause', {
@@ -1594,13 +2775,13 @@ export default function App() {
         artist: currentTrack?.artist,
       });
     } else {
-      if (!audioEl.src && currentTrack) {
-        audioEl.src = currentTrack.src;
+      if (!mediaEl.src && currentTrack) {
+        mediaEl.src = currentTrack.src;
       }
-      const started = await startPlaybackSafe(true);
+      const started = await startPlaybackSafe(true, currentTrack);
       if (started) {
         persistCurrentSession({
-          currentTime: audioEl.currentTime,
+          currentTime: mediaEl.currentTime,
           wasPlaying: true,
         });
         trackEvent('audio_play', {
@@ -1614,6 +2795,7 @@ export default function App() {
   }, [
     currentTrack,
     ensureAudioGraph,
+    getActiveMediaElement,
     handleTriggerDemo,
     isPlaying,
     persistCurrentSession,
@@ -1654,6 +2836,10 @@ export default function App() {
         return;
       }
       if (e.code === 'Space') {
+        if (isRecordingRef.current) {
+          e.preventDefault();
+          return;
+        }
         e.preventDefault();
         void togglePlay();
       }
@@ -1662,28 +2848,100 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [togglePlay]);
 
+  // Photo slideshow 5-second auto-advance timer (works in both Studio preview and MP4 recording)
+  useEffect(() => {
+    if (currentTrack?.mediaType !== 'image' || !isPlaying) return;
+    setDuration(IMAGE_SLIDE_DURATION_SEC);
+    let lastTick = performance.now();
+
+    const timerId = window.setInterval(() => {
+      const now = performance.now();
+      const dt = (now - lastTick) / 1000;
+      lastTick = now;
+      imageElapsedRef.current += dt;
+      const clamped = Math.min(IMAGE_SLIDE_DURATION_SEC, imageElapsedRef.current);
+      setCurrentTime(clamped);
+
+      if (imageElapsedRef.current >= IMAGE_SLIDE_DURATION_SEC) {
+        if (isRecordingRef.current) {
+          const hasNextSlide =
+            playlistRef.current.length > 1 &&
+            !isShuffle &&
+            !isRepeat &&
+            currentIndexRef.current + 1 < playlistRef.current.length &&
+            playlistRef.current.some(
+              (item) => item.mediaType === 'image' || item.mediaType === 'video'
+            );
+          if (hasNextSlide) {
+            window.clearInterval(timerId);
+            void selectTrack(currentIndexRef.current + 1, true, true);
+            return;
+          }
+          window.clearInterval(timerId);
+          stopStudioRecording();
+          return;
+        }
+
+        if (isRepeat || playlistRef.current.length <= 1) {
+          imageElapsedRef.current = 0;
+          setCurrentTime(0);
+        } else {
+          window.clearInterval(timerId);
+          nextTrack(true);
+        }
+      }
+    }, 50);
+
+    return () => window.clearInterval(timerId);
+  }, [
+    currentTrack?.id,
+    currentTrack?.mediaType,
+    isPlaying,
+    isRepeat,
+    isShuffle,
+    nextTrack,
+    selectTrack,
+    stopStudioRecording,
+  ]);
+
   const handleSeek = (clientX: number, rect: DOMRect) => {
-    const audioEl = audioRef.current;
-    if (!audioEl || !Number.isFinite(audioEl.duration) || audioEl.duration <= 0) return;
-    pendingSeekRef.current = null;
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    audioEl.currentTime = ratio * audioEl.duration;
-    setCurrentTime(audioEl.currentTime);
-    persistCurrentSession({ currentTime: audioEl.currentTime });
+    if (currentTrack?.mediaType === 'image') {
+      const nextTime = ratio * IMAGE_SLIDE_DURATION_SEC;
+      imageElapsedRef.current = nextTime;
+      setCurrentTime(nextTime);
+      return;
+    }
+    const mediaEl = getActiveMediaElement();
+    if (!mediaEl || !Number.isFinite(mediaEl.duration) || mediaEl.duration <= 0) return;
+    pendingSeekRef.current = null;
+    mediaEl.currentTime = ratio * mediaEl.duration;
+    setCurrentTime(mediaEl.currentTime);
+    persistCurrentSession({ currentTime: mediaEl.currentTime });
     trackEvent('audio_seek', { progress_pct: Math.round(ratio * 100) });
   };
 
-  // Auto-enter Floating Track Orbs mode after 10 seconds of inactivity while playing
+  // Auto-enter Floating Track Orbs mode after 10 seconds of inactivity while playing audio
   useEffect(() => {
     const anyModalOpen =
       isSourcesOpen ||
       isEqOpen ||
+      isStageMediaOpen ||
       isMobileMenuOpen ||
       isMobilePlaylistOpen ||
       isInstallGuideOpen ||
       isInstallPromoOpen;
 
-    if (!isPlaying || !uiVisible || anyModalOpen) {
+    if (
+      !isPlaying ||
+      !uiVisible ||
+      anyModalOpen ||
+      isStudioMode ||
+      isRecordArmed ||
+      isRecording ||
+      currentTrack?.mediaType === 'video' ||
+      currentTrack?.mediaType === 'image'
+    ) {
       return;
     }
 
@@ -1726,15 +2984,27 @@ export default function App() {
       window.removeEventListener('pointermove', handlePointerMove);
     };
   }, [
+    currentTrack?.mediaType,
     isEqOpen,
     isInstallGuideOpen,
     isInstallPromoOpen,
     isMobileMenuOpen,
     isMobilePlaylistOpen,
     isPlaying,
+    isRecordArmed,
+    isRecording,
     isSourcesOpen,
+    isStageMediaOpen,
+    isStudioMode,
     uiVisible,
   ]);
+
+  // Never allow UI controls to remain hidden while Studio Mode, Record Armed, or Active Recording is engaged
+  useEffect(() => {
+    if ((isStudioMode || isRecordArmed || isRecording) && !uiVisible) {
+      setUiVisible(true);
+    }
+  }, [isRecordArmed, isRecording, isStudioMode, uiVisible]);
 
   // Show mystical install promo modal once on first launch when not already installed
   useEffect(() => {
@@ -1829,14 +3099,934 @@ export default function App() {
     }
   }, [showToast, t.otherInstallIntro, toggleFullscreen]);
 
+  const isVideoTrack = currentTrack?.mediaType === 'video';
+  const isImageTrack = currentTrack?.mediaType === 'image';
+  const isClassicVideoPlayer = isVideoTrack && !isStudioMode;
+
+  const stopCameraStream = useCallback(() => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((tr) => tr.stop());
+      cameraStreamRef.current = null;
+    }
+    if (cameraVideoRef.current && cameraVideoRef.current.srcObject) {
+      cameraVideoRef.current.srcObject = null;
+    }
+    if (customBgVideoRef.current && customBgVideoRef.current.srcObject) {
+      customBgVideoRef.current.srcObject = null;
+    }
+  }, []);
+
+  const stopMicStream = useCallback(() => {
+    if (micSourceRef.current) {
+      try {
+        micSourceRef.current.disconnect();
+      } catch {
+        // ignore disconnect errors
+      }
+      micSourceRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((tr) => tr.stop());
+      micStreamRef.current = null;
+    }
+  }, []);
+
+  const forceLiveModeIfNeeded = useCallback(() => {
+    setRecordRenderMode((prev) => {
+      if (prev === 'offline') {
+        try {
+          localStorage.setItem(STORAGE_RECORD_RENDER_MODE_KEY, 'live');
+        } catch {
+          // ignore
+        }
+        showToast(studioT.customMediaLiveRequiredToast, 'info');
+        return 'live';
+      }
+      return prev;
+    });
+  }, [showToast, studioT.customMediaLiveRequiredToast]);
+
+  const revokeStageMediaQueueUrls = useCallback((excludeSrc?: string) => {
+    for (const item of stageMediaQueueRef.current) {
+      if (item.src !== excludeSrc && item.src.startsWith('blob:')) {
+        URL.revokeObjectURL(item.src);
+      }
+    }
+    stageMediaQueueRef.current = [];
+  }, []);
+
+  const advanceStageMedia = useCallback((delta: number) => {
+    const queue = stageMediaQueueRef.current;
+    if (queue.length <= 1) return;
+    const nextIdx = (stageMediaIndexRef.current + delta + queue.length) % queue.length;
+    const nextItem = queue[nextIdx];
+    if (!nextItem) return;
+    stageMediaIndexRef.current = nextIdx;
+    setStageMediaIndex(nextIdx);
+
+    // Preload following photo in background so transitions have zero flicker
+    const upcoming = queue[(nextIdx + 1) % queue.length];
+    if (upcoming?.kind === 'image') {
+      const preloadImg = new Image();
+      preloadImg.src = upcoming.src;
+    }
+
+    setCustomStageMedia((prev) =>
+      prev
+        ? {
+            ...prev,
+            kind: nextItem.kind,
+            src: nextItem.src,
+            name: nextItem.name,
+          }
+        : prev
+    );
+  }, []);
+
+  // Auto-advance multi-photo background slideshow every 5 seconds while playing or recording
+  useEffect(() => {
+    if (customStageMedia?.kind !== 'image' || stageMediaQueue.length <= 1) return;
+    if (!isPlaying && !isRecording) return;
+
+    const timerId = window.setTimeout(() => {
+      advanceStageMedia(1);
+    }, 5000);
+    return () => window.clearTimeout(timerId);
+  }, [advanceStageMedia, customStageMedia?.kind, customStageMedia?.src, isPlaying, isRecording, stageMediaQueue.length]);
+
+  // Live recording watchdog: keeps elapsed timer accurate, prevents Android AudioContext/AudioFocus pauses, and recovers stalled remote streams
+  useEffect(() => {
+    if (!isRecording || offlineExportState) {
+      setRecordingElapsedSec(0);
+      return;
+    }
+
+    let tickCount = 0;
+    const id = window.setInterval(() => {
+      setRecordingElapsedSec(Math.max(0, (performance.now() - recordingStartPerfRef.current) / 1000));
+      tickCount += 1;
+      if (tickCount % 3 !== 0) return;
+
+      if (audioCtxRef.current?.state === 'suspended') {
+        void audioCtxRef.current.resume().catch(() => {});
+      }
+
+      if (
+        customStageMediaRef.current?.kind === 'video' &&
+        customBgVideoRef.current &&
+        !customBgVideoRef.current.ended &&
+        customBgVideoRef.current.paused
+      ) {
+        void customBgVideoRef.current.play().catch(() => {});
+      }
+
+      if (!isPlayingRef.current) return;
+      const activeTrack = playlistRef.current[currentIndexRef.current];
+      if (!activeTrack || activeTrack.mediaType === 'image') return;
+      const activeEl = getActiveMediaElement(activeTrack);
+      if (!activeEl || activeEl.ended) return;
+
+      if (activeEl.paused) {
+        recordingStallCheckRef.current.stagnantTicks = 0;
+        void activeEl.play().catch(() => {});
+        return;
+      }
+
+      const cur = activeEl.currentTime;
+      const prev = recordingStallCheckRef.current.lastTime;
+      if (prev >= 0 && Math.abs(cur - prev) < 0.02) {
+        recordingStallCheckRef.current.stagnantTicks += 1;
+        if (
+          recordingStallCheckRef.current.stagnantTicks >= 5 &&
+          !recordingStallCheckRef.current.recovering &&
+          activeEl.src
+        ) {
+          recordingStallCheckRef.current.recovering = true;
+          recordingStallCheckRef.current.stagnantTicks = 0;
+          const resumeAt = cur;
+          pendingSeekRef.current = { src: activeEl.src, time: resumeAt };
+          try {
+            activeEl.load();
+            void activeEl.play().catch(() => {});
+          } finally {
+            window.setTimeout(() => {
+              recordingStallCheckRef.current.recovering = false;
+            }, 3000);
+          }
+        }
+      } else {
+        recordingStallCheckRef.current.lastTime = cur;
+        recordingStallCheckRef.current.stagnantTicks = 0;
+      }
+    }, 250);
+
+    return () => window.clearInterval(id);
+  }, [getActiveMediaElement, isRecording, offlineExportState]);
+
+  const handlePickStageMediaFiles = useCallback(
+    (fileList: FileList | null) => {
+      if (!fileList || fileList.length === 0) return;
+      const validFiles = Array.from(fileList).filter((file) => {
+        const isVid =
+          file.type.startsWith('video/') || /\.(mp4|webm|mov|m4v|ogv)$/i.test(file.name);
+        const isImg =
+          file.type.startsWith('image/') ||
+          /\.(jpg|jpeg|png|webp|gif|bmp|avif)$/i.test(file.name);
+        return isVid || isImg;
+      });
+
+      if (validFiles.length === 0) {
+        showToast(studioT.customMediaInvalidToast, 'error');
+        return;
+      }
+
+      const keepCameraPip =
+        customStageMediaRef.current?.kind === 'camera' || cameraOverlayActiveRef.current;
+      if (keepCameraPip) {
+        cameraOverlayActiveRef.current = true;
+        setCameraOverlayActive(true);
+      }
+
+      const prevSrc = customStageMediaRef.current?.src;
+      revokeStageMediaQueueUrls();
+      if (prevSrc?.startsWith('blob:')) {
+        URL.revokeObjectURL(prevSrc);
+      }
+
+      const nextItems: StageMediaItem[] = validFiles.map((file) => {
+        const isVid =
+          file.type.startsWith('video/') || /\.(mp4|webm|mov|m4v|ogv)$/i.test(file.name);
+        const cleanName = file.name.replace(/\.[^/.]+$/, '') || file.name;
+        return {
+          kind: isVid ? 'video' : 'image',
+          src: URL.createObjectURL(file),
+          name: cleanName,
+        };
+      });
+
+      stageMediaQueueRef.current = nextItems;
+      stageMediaIndexRef.current = 0;
+      setStageMediaQueue(nextItems);
+      setStageMediaIndex(0);
+
+      const first = nextItems[0];
+      const displayMode: StageMediaDisplayMode = keepCameraPip
+        ? 'backdrop'
+        : customStageMediaRef.current?.displayMode ?? 'frame';
+      const frameMotion: FrameMotionMode =
+        customStageMediaRef.current?.frameMotion ?? 'static';
+      const frameRotationTarget: FrameRotationTarget =
+        customStageMediaRef.current?.frameRotationTarget ?? 'none';
+      const backdropOverlay: BackdropOverlayMode =
+        customStageMediaRef.current?.backdropOverlay ?? 'visualizer';
+      const hasAnyVideo = nextItems.some((item) => item.kind === 'video');
+      const nextMedia: CustomStageMedia = {
+        kind: first.kind,
+        src: first.src,
+        name: first.name,
+        displayMode,
+        frameMotion,
+        frameRotationTarget,
+        backdropOverlay,
+        soundEnabled: hasAnyVideo ? true : customStageMediaRef.current?.soundEnabled ?? true,
+        soundVolume: customStageMediaRef.current?.soundVolume ?? 0.8,
+      };
+
+      if (hasAnyVideo) {
+        ensureAudioGraph();
+      }
+      if (first.kind === 'video') {
+        const vid = customBgVideoRef.current;
+        if (vid) {
+          vid.removeAttribute('crossorigin');
+          vid.preload = 'auto';
+          vid.loop = nextItems.length <= 1;
+          vid.src = first.src;
+          vid.load();
+          if (isPlayingRef.current || isRecordingRef.current) {
+            vid.muted = isMuted;
+            void vid.play().catch(() => {
+              vid.muted = true;
+              void vid.play().catch(() => {});
+            });
+          }
+        }
+      } else {
+        const probe = new Image();
+        probe.onerror = () => {
+          showToast(studioT.customMediaImageDecodeErrorToast, 'error');
+        };
+        probe.src = first.src;
+      }
+
+      if (nextItems[1]?.kind === 'image') {
+        const preloadImg = new Image();
+        preloadImg.src = nextItems[1].src;
+      }
+
+      setCustomStageMedia(nextMedia);
+      const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+      if (activeType !== 'video' && activeType !== 'image') {
+        const useFrameStudio = keepCameraPip || displayMode === 'frame';
+        isStudioModeRef.current = useFrameStudio;
+        setIsStudioMode(useFrameStudio);
+      }
+      showToast(
+        nextItems.length > 1
+          ? keepCameraPip
+            ? studioT.customMediaMultiPipToast(nextItems.length)
+            : studioT.customMediaMultiToast(nextItems.length)
+          : keepCameraPip
+          ? studioT.customMediaPipToast
+          : first.kind === 'video'
+          ? studioT.customMediaVideoToast(first.name)
+          : studioT.customMediaImageToast(first.name),
+        'success'
+      );
+      trackEvent('stage_media_set', {
+        kind: nextMedia.kind,
+        count: nextItems.length,
+        mode: displayMode,
+        pip_camera: keepCameraPip,
+      });
+    },
+    [ensureAudioGraph, isMuted, revokeStageMediaQueueUrls, showToast, studioT]
+  );
+
+  const attachMicStreamToAudioGraph = useCallback(
+    (audioStream: MediaStream) => {
+      stopMicStream();
+      ensureAudioGraph();
+      micStreamRef.current = audioStream;
+
+      const ctx = audioCtxRef.current;
+      if (ctx) {
+        if (!micGainRef.current) {
+          const mg = ctx.createGain();
+          mg.gain.value = micVolumeRef.current;
+          if (analyserRef.current) mg.connect(analyserRef.current);
+          if (recLimiterRef.current) {
+            mg.connect(recLimiterRef.current);
+          } else if (streamDestRef.current) {
+            mg.connect(streamDestRef.current);
+          }
+          micGainRef.current = mg;
+        }
+        if (!micHighpassRef.current) {
+          const hp = ctx.createBiquadFilter();
+          hp.type = 'highpass';
+          hp.frequency.value = 75;
+          hp.Q.value = 0.7;
+          hp.connect(micGainRef.current);
+          micHighpassRef.current = hp;
+        }
+        const mSrc = ctx.createMediaStreamSource(audioStream);
+        mSrc.connect(micHighpassRef.current);
+        micSourceRef.current = mSrc;
+      }
+
+      micEnabledRef.current = true;
+      setMicEnabled(true);
+    },
+    [ensureAudioGraph, stopMicStream]
+  );
+
+  const getMicConstraints = useCallback(
+    (useEchoFilter: boolean): MediaTrackConstraints => ({
+      // Disabling echoCancellation/AGC by default keeps Android out of 16kHz VoIP call mode
+      echoCancellation: useEchoFilter,
+      noiseSuppression: useEchoFilter,
+      autoGainControl: false,
+      channelCount: { ideal: 1 },
+    }),
+    []
+  );
+
+  const bindCameraPreviewStream = useCallback(async (videoStream: MediaStream) => {
+    cameraStreamRef.current = videoStream;
+    const camEl = cameraVideoRef.current;
+    if (camEl) {
+      camEl.muted = true;
+      camEl.playsInline = true;
+      camEl.srcObject = videoStream;
+      try {
+        await camEl.play();
+      } catch {
+        // retry silently on next render effect if browser deferred
+      }
+    }
+  }, []);
+
+  const handleToggleCamera = useCallback(async () => {
+    if (customStageMediaRef.current?.kind === 'camera' || cameraOverlayActiveRef.current) {
+      stopCameraStream();
+      if (cameraOverlayActiveRef.current) {
+        cameraOverlayActiveRef.current = false;
+        setCameraOverlayActive(false);
+        const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+        if (activeType !== 'image' && activeType !== 'video') {
+          const keepStudio =
+            isRecordArmedRef.current || customStageMediaRef.current?.displayMode === 'frame';
+          isStudioModeRef.current = keepStudio;
+          setIsStudioMode(keepStudio);
+        }
+      } else {
+        setCustomStageMedia(null);
+        const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+        if (activeType !== 'image' && activeType !== 'video' && !isRecordArmedRef.current) {
+          isStudioModeRef.current = false;
+          setIsStudioMode(false);
+        }
+      }
+      showToast(studioT.customMediaCameraStoppedToast, 'info');
+      trackEvent('stage_camera_toggle', { enabled: false });
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showToast(studioT.customMediaDeviceErrorToast, 'error');
+      return;
+    }
+
+    const videoConstraints: MediaTrackConstraints = {
+      facingMode: { ideal: cameraFacingRef.current },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+    };
+
+    const wantMicWithCamera = !micEnabledRef.current;
+    const micConstraints = getMicConstraints(micEchoFilterRef.current);
+
+    try {
+      let combinedStream: MediaStream;
+      if (wantMicWithCamera) {
+        try {
+          // Request Camera video + Microphone audio together so the user can record live video with sound over the active track
+          combinedStream = await navigator.mediaDevices.getUserMedia({
+            video: videoConstraints,
+            audio: micConstraints,
+          });
+        } catch {
+          combinedStream = await navigator.mediaDevices.getUserMedia({
+            video: videoConstraints,
+            audio: false,
+          });
+        }
+      } else {
+        combinedStream = await navigator.mediaDevices.getUserMedia({
+          video: videoConstraints,
+          audio: false,
+        });
+      }
+
+      const videoTracks = combinedStream.getVideoTracks();
+      const audioTracks = combinedStream.getAudioTracks();
+      const videoOnlyStream = new MediaStream(videoTracks);
+
+      stopCameraStream();
+      await bindCameraPreviewStream(videoOnlyStream);
+
+      let micJoinedNow = false;
+      if (audioTracks.length > 0) {
+        attachMicStreamToAudioGraph(new MediaStream(audioTracks));
+        micJoinedNow = true;
+      }
+
+      const existing = customStageMediaRef.current;
+      const hasFileBackground = Boolean(
+        existing && (existing.kind === 'image' || existing.kind === 'video')
+      );
+
+      if (hasFileBackground && existing) {
+        // Dual-video / reaction PiP mode: keep device file on full backdrop and render live Camera inside Studio frame
+        cameraOverlayActiveRef.current = true;
+        setCameraOverlayActive(true);
+        setCustomStageMedia((prev) =>
+          prev
+            ? {
+                ...prev,
+                displayMode: 'backdrop',
+              }
+            : prev
+        );
+        const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+        if (activeType !== 'video' && activeType !== 'image') {
+          isStudioModeRef.current = true;
+          setIsStudioMode(true);
+        }
+        forceLiveModeIfNeeded();
+        showToast(studioT.customMediaPipToast, 'success');
+        trackEvent('stage_camera_toggle', {
+          enabled: true,
+          pip: true,
+          with_mic: micJoinedNow || micEnabledRef.current,
+        });
+        return;
+      }
+
+      cameraOverlayActiveRef.current = false;
+      setCameraOverlayActive(false);
+
+      const frameMotion: FrameMotionMode = existing?.frameMotion ?? 'static';
+      const frameRotationTarget: FrameRotationTarget = existing?.frameRotationTarget ?? 'none';
+
+      setCustomStageMedia({
+        kind: 'camera',
+        src: '',
+        name: studioT.customMediaCameraActiveLabel,
+        displayMode: 'frame',
+        frameMotion,
+        frameRotationTarget,
+        backdropOverlay: existing?.backdropOverlay ?? 'visualizer',
+        soundEnabled: false,
+        soundVolume: existing?.soundVolume ?? 0.8,
+      });
+
+      const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+      if (activeType !== 'video' && activeType !== 'image') {
+        isStudioModeRef.current = true;
+        setIsStudioMode(true);
+      }
+
+      forceLiveModeIfNeeded();
+      const hasMicNow = micJoinedNow || micEnabledRef.current;
+      showToast(
+        hasMicNow
+          ? studioT.customMediaCameraAndMicStartedToast
+          : studioT.customMediaCameraStartedToast,
+        'success'
+      );
+      trackEvent('stage_camera_toggle', { enabled: true, with_mic: hasMicNow });
+    } catch {
+      showToast(studioT.customMediaDeviceErrorToast, 'error');
+    }
+  }, [
+    attachMicStreamToAudioGraph,
+    bindCameraPreviewStream,
+    forceLiveModeIfNeeded,
+    getMicConstraints,
+    showToast,
+    stopCameraStream,
+    studioT,
+  ]);
+
+  const handleFlipCamera = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showToast(studioT.customMediaDeviceErrorToast, 'error');
+      return;
+    }
+
+    const prevFacing = cameraFacingRef.current;
+    const prevDeviceId = cameraStreamRef.current?.getVideoTracks()[0]?.getSettings?.().deviceId;
+    const nextFacing = prevFacing === 'user' ? 'environment' : 'user';
+
+    // Release active camera FIRST (Android Camera2 blocks opening rear camera while front camera is still live)
+    stopCameraStream();
+    await new Promise((resolve) => window.setTimeout(resolve, 120));
+
+    const openVideoStream = async (): Promise<MediaStream> => {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: nextFacing },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+      } catch {
+        // Retry without resolution constraints (some dual-lens mobile sensors reject HD constraints on rear lens)
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: nextFacing } },
+            audio: false,
+          });
+        } catch {
+          // Last fallback: pick next enumerated videoinput deviceId
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoInputs = devices.filter((d) => d.kind === 'videoinput');
+          const otherCam = videoInputs.find((d) => d.deviceId && d.deviceId !== prevDeviceId);
+          if (otherCam) {
+            return await navigator.mediaDevices.getUserMedia({
+              video: { deviceId: { exact: otherCam.deviceId } },
+              audio: false,
+            });
+          }
+          throw new Error('No secondary camera available');
+        }
+      }
+    };
+
+    try {
+      const stream = await openVideoStream();
+      cameraFacingRef.current = nextFacing;
+      await bindCameraPreviewStream(stream);
+      trackEvent('stage_camera_flip', { facing: nextFacing });
+    } catch {
+      // Restore previous camera cleanly if device has only 1 lens or failed to switch
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: prevFacing } },
+          audio: false,
+        });
+        await bindCameraPreviewStream(fallbackStream);
+      } catch {
+        if (cameraOverlayActiveRef.current) {
+          cameraOverlayActiveRef.current = false;
+          setCameraOverlayActive(false);
+        } else {
+          setCustomStageMedia(null);
+        }
+      }
+      showToast(studioT.customMediaDeviceErrorToast, 'error');
+    }
+  }, [bindCameraPreviewStream, showToast, stopCameraStream, studioT.customMediaDeviceErrorToast]);
+
+  const handleToggleMicrophone = useCallback(async () => {
+    if (micEnabledRef.current) {
+      stopMicStream();
+      micEnabledRef.current = false;
+      setMicEnabled(false);
+      showToast(studioT.customMediaMicStoppedToast, 'info');
+      trackEvent('stage_mic_toggle', { enabled: false });
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showToast(studioT.customMediaDeviceErrorToast, 'error');
+      return;
+    }
+
+    ensureAudioGraph();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: getMicConstraints(micEchoFilterRef.current),
+        video: false,
+      });
+      attachMicStreamToAudioGraph(stream);
+      forceLiveModeIfNeeded();
+      showToast(studioT.customMediaMicStartedToast, 'success');
+      trackEvent('stage_mic_toggle', { enabled: true });
+    } catch {
+      showToast(studioT.customMediaDeviceErrorToast, 'error');
+    }
+  }, [
+    attachMicStreamToAudioGraph,
+    ensureAudioGraph,
+    forceLiveModeIfNeeded,
+    getMicConstraints,
+    showToast,
+    stopMicStream,
+    studioT,
+  ]);
+
+  const handleToggleMicEchoFilter = useCallback(async () => {
+    const nextFilter = !micEchoFilterRef.current;
+    micEchoFilterRef.current = nextFilter;
+    setMicEchoFilter(nextFilter);
+
+    if (micEnabledRef.current && navigator.mediaDevices?.getUserMedia) {
+      try {
+        const nextStream = await navigator.mediaDevices.getUserMedia({
+          audio: getMicConstraints(nextFilter),
+          video: false,
+        });
+        attachMicStreamToAudioGraph(nextStream);
+      } catch {
+        // keep existing mic stream if browser rejects constraint switch
+      }
+    }
+  }, [attachMicStreamToAudioGraph, getMicConstraints]);
+
+  const handleToggleFrameMotion = useCallback(() => {
+    const current = customStageMediaRef.current;
+    if (!current) {
+      const nextMotion: FrameMotionMode =
+        coverFrameMotionRef.current === 'floating' ? 'static' : 'floating';
+      coverFrameMotionRef.current = nextMotion;
+      setCoverFrameMotion(nextMotion);
+      const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+      if (activeType !== 'video' && activeType !== 'image') {
+        isStudioModeRef.current = true;
+        setIsStudioMode(true);
+      }
+      showToast(
+        nextMotion === 'floating'
+          ? studioT.customMediaModeFloatingToast
+          : studioT.customMediaModeFrameToast,
+        'info'
+      );
+      trackEvent('stage_cover_mode', { motion: nextMotion });
+      return;
+    }
+    const isPip = cameraOverlayActiveRef.current;
+    const switchingFromBackdrop = !isPip && current.displayMode === 'backdrop';
+    const nextMotion: FrameMotionMode = switchingFromBackdrop
+      ? current.frameMotion
+      : current.frameMotion === 'floating'
+      ? 'static'
+      : 'floating';
+    const nextDisplay: StageMediaDisplayMode = isPip ? 'backdrop' : 'frame';
+    setCustomStageMedia((prev) =>
+      prev
+        ? {
+            ...prev,
+            displayMode: nextDisplay,
+            frameMotion: nextMotion,
+          }
+        : prev
+    );
+    const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+    if (activeType !== 'video' && activeType !== 'image') {
+      isStudioModeRef.current = true;
+      setIsStudioMode(true);
+    }
+    showToast(
+      nextMotion === 'floating'
+        ? studioT.customMediaModeFloatingToast
+        : studioT.customMediaModeFrameToast,
+      'info'
+    );
+    trackEvent('stage_media_mode', { mode: nextDisplay, motion: nextMotion });
+  }, [showToast, studioT]);
+
+  const handleToggleFrameRotation = useCallback(() => {
+    const current = customStageMediaRef.current;
+    if (!current) {
+      const turnOff = coverRotationTargetRef.current !== 'none';
+      const nextTarget: FrameRotationTarget = turnOff ? 'none' : lastRotationTargetRef.current;
+      coverRotationTargetRef.current = nextTarget;
+      setCoverRotationTarget(nextTarget);
+      const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+      if (activeType !== 'video' && activeType !== 'image') {
+        isStudioModeRef.current = true;
+        setIsStudioMode(true);
+      }
+      if (!turnOff) {
+        showToast(studioT.customMediaModeRotatingToast, 'info');
+      }
+      trackEvent('stage_cover_rotation', { target: nextTarget });
+      return;
+    }
+    const isPip = cameraOverlayActiveRef.current;
+    const isFrameShown = isPip || current.displayMode === 'frame';
+    const turnOff = isFrameShown && current.frameRotationTarget !== 'none';
+    const nextTarget: FrameRotationTarget = turnOff ? 'none' : lastRotationTargetRef.current;
+    const nextDisplay: StageMediaDisplayMode = isPip ? 'backdrop' : 'frame';
+    setCustomStageMedia((prev) =>
+      prev
+        ? {
+            ...prev,
+            displayMode: nextDisplay,
+            frameRotationTarget: nextTarget,
+          }
+        : prev
+    );
+    const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+    if (activeType !== 'video' && activeType !== 'image') {
+      isStudioModeRef.current = true;
+      setIsStudioMode(true);
+    }
+    if (!turnOff) {
+      showToast(studioT.customMediaModeRotatingToast, 'info');
+    }
+    trackEvent('stage_media_rotation', { target: nextTarget });
+  }, [showToast, studioT]);
+
+  const handleSelectRotationTarget = useCallback(
+    (target: Exclude<FrameRotationTarget, 'none'>) => {
+      lastRotationTargetRef.current = target;
+      const current = customStageMediaRef.current;
+      if (!current) {
+        coverRotationTargetRef.current = target;
+        setCoverRotationTarget(target);
+        const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+        if (activeType !== 'video' && activeType !== 'image') {
+          isStudioModeRef.current = true;
+          setIsStudioMode(true);
+        }
+        trackEvent('stage_cover_rotation', { target });
+        return;
+      }
+      const isPip = cameraOverlayActiveRef.current;
+      const nextDisplay: StageMediaDisplayMode = isPip ? 'backdrop' : 'frame';
+      setCustomStageMedia((prev) =>
+        prev
+          ? {
+              ...prev,
+              displayMode: nextDisplay,
+              frameRotationTarget: target,
+            }
+          : prev
+      );
+      const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+      if (activeType !== 'video' && activeType !== 'image') {
+        isStudioModeRef.current = true;
+        setIsStudioMode(true);
+      }
+      trackEvent('stage_media_rotation', { target });
+    },
+    []
+  );
+
+  const handleToggleCoverCaption = useCallback(() => {
+    const next = !showCoverCaptionRef.current;
+    showCoverCaptionRef.current = next;
+    setShowCoverCaption(next);
+    if (next) {
+      const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+      if (activeType !== 'video' && activeType !== 'image') {
+        isStudioModeRef.current = true;
+        setIsStudioMode(true);
+      }
+    }
+    showToast(
+      next ? studioT.customMediaCaptionOnToast : studioT.customMediaCaptionOffToast,
+      'info'
+    );
+    trackEvent('stage_cover_caption', { enabled: next });
+  }, [showToast, studioT]);
+
+  const handleActivateBackdrop = useCallback(() => {
+    const current = customStageMediaRef.current;
+    if (!current) return;
+    const isPip = cameraOverlayActiveRef.current;
+    setCustomStageMedia((prev) =>
+      prev
+        ? {
+            ...prev,
+            displayMode: 'backdrop',
+            frameRotationTarget: isPip ? prev.frameRotationTarget : 'none',
+          }
+        : prev
+    );
+    const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+    if (activeType !== 'video' && activeType !== 'image') {
+      isStudioModeRef.current = isPip;
+      setIsStudioMode(isPip);
+    }
+    showToast(studioT.customMediaModeBackdropToast, 'info');
+    trackEvent('stage_media_mode', {
+      mode: 'backdrop',
+      overlay: current.backdropOverlay,
+    });
+  }, [showToast, studioT]);
+
+  const handleSelectBackdropOverlay = useCallback((overlay: BackdropOverlayMode) => {
+    const isPip = cameraOverlayActiveRef.current;
+    setCustomStageMedia((prev) =>
+      prev
+        ? {
+            ...prev,
+            displayMode: 'backdrop',
+            backdropOverlay: overlay,
+            frameRotationTarget: isPip ? prev.frameRotationTarget : 'none',
+          }
+        : prev
+    );
+    const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+    if (activeType !== 'video' && activeType !== 'image') {
+      isStudioModeRef.current = isPip;
+      setIsStudioMode(isPip);
+    }
+    if (overlay === 'clean') {
+      liveOrbsSnapshotRef.current = [];
+    }
+    trackEvent('stage_media_backdrop_overlay', { overlay });
+  }, []);
+
+  const handleToggleStageMediaSound = useCallback(() => {
+    const current = customStageMediaRef.current;
+    if (!current || current.kind !== 'video') return;
+    const nextEnabled = !current.soundEnabled;
+    if (nextEnabled) {
+      ensureAudioGraph();
+    }
+    setCustomStageMedia((prev) =>
+      prev && prev.kind === 'video' ? { ...prev, soundEnabled: nextEnabled } : prev
+    );
+  }, [ensureAudioGraph]);
+
+  const handleChangeStageMediaVolume = useCallback((vol: number) => {
+    const clamped = Math.max(0, Math.min(1, vol));
+    setCustomStageMedia((prev) => (prev ? { ...prev, soundVolume: clamped } : prev));
+  }, []);
+
+  const handleRemoveFileMedia = useCallback(() => {
+    const current = customStageMediaRef.current;
+    if (!current) return;
+    revokeStageMediaQueueUrls(current.src);
+    setStageMediaQueue([]);
+    stageMediaIndexRef.current = 0;
+    setStageMediaIndex(0);
+    if (current.src.startsWith('blob:')) {
+      URL.revokeObjectURL(current.src);
+    }
+    if (cameraOverlayActiveRef.current) {
+      cameraOverlayActiveRef.current = false;
+      setCameraOverlayActive(false);
+      setCustomStageMedia({
+        kind: 'camera',
+        src: '',
+        name: studioT.customMediaCameraActiveLabel,
+        displayMode: 'frame',
+        frameMotion: current.frameMotion,
+        frameRotationTarget: current.frameRotationTarget,
+        backdropOverlay: 'visualizer',
+        soundEnabled: false,
+        soundVolume: current.soundVolume,
+      });
+      const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+      if (activeType !== 'image' && activeType !== 'video') {
+        isStudioModeRef.current = true;
+        setIsStudioMode(true);
+      }
+      return;
+    }
+    setCustomStageMedia(null);
+    const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+    if (activeType !== 'image' && activeType !== 'video' && !isRecordArmedRef.current) {
+      isStudioModeRef.current = false;
+      setIsStudioMode(false);
+    }
+  }, [revokeStageMediaQueueUrls, studioT.customMediaCameraActiveLabel]);
+
+  const handleClearStageMedia = useCallback(() => {
+    stopCameraStream();
+    stopMicStream();
+    setMicEnabled(false);
+    cameraOverlayActiveRef.current = false;
+    setCameraOverlayActive(false);
+    const prevSrc = customStageMediaRef.current?.src;
+    revokeStageMediaQueueUrls(prevSrc);
+    setStageMediaQueue([]);
+    stageMediaIndexRef.current = 0;
+    setStageMediaIndex(0);
+    if (prevSrc?.startsWith('blob:')) {
+      URL.revokeObjectURL(prevSrc);
+    }
+    setCustomStageMedia(null);
+    const activeType = playlistRef.current[currentIndexRef.current]?.mediaType;
+    if (activeType !== 'image' && activeType !== 'video' && !isRecordArmedRef.current) {
+      isStudioModeRef.current = false;
+      setIsStudioMode(false);
+    }
+    showToast(studioT.customMediaClearedToast, 'info');
+    trackEvent('stage_media_clear');
+  }, [revokeStageMediaQueueUrls, showToast, stopCameraStream, stopMicStream, studioT]);
+
   const handleStageBackgroundClick = (e: MouseEvent<HTMLElement>) => {
     if (
+      isRecording ||
+      isRecordArmed ||
       isSourcesOpen ||
       isEqOpen ||
+      isStageMediaOpen ||
       isMobileMenuOpen ||
       isMobilePlaylistOpen ||
       isInstallGuideOpen ||
-      isInstallPromoOpen
+      isInstallPromoOpen ||
+      isStudioMode
     ) {
       return;
     }
@@ -1855,24 +4045,489 @@ export default function App() {
     });
   };
 
+  const handleStageDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+      void handleSelectFolderInputFiles(e.dataTransfer.files);
+    }
+  };
+
+  const handlePlayHoldStart = () => {
+    window.clearTimeout(playHoldTimerRef.current);
+    playHoldTriggeredRef.current = false;
+    setIsHoldingPlay(true);
+    playHoldTimerRef.current = window.setTimeout(() => {
+      playHoldTriggeredRef.current = true;
+      setIsHoldingPlay(false);
+      if (isRecordingRef.current) return;
+
+      if (isRecordArmed) {
+        isRecordArmedRef.current = false;
+        setIsRecordArmed(false);
+        setUiVisible(true);
+        if (
+          currentTrack?.mediaType === 'video' ||
+          (currentTrack?.mediaType !== 'image' &&
+            !cameraOverlayActiveRef.current &&
+            customStageMediaRef.current?.displayMode !== 'frame')
+        ) {
+          isStudioModeRef.current = false;
+          setIsStudioMode(false);
+        }
+        showToast(studioT.recordDisarmedToast, 'info');
+        return;
+      }
+
+      setUiVisible(true);
+      const hasFullscreenBackdropOnly = Boolean(
+        customStageMediaRef.current &&
+          customStageMediaRef.current.displayMode === 'backdrop' &&
+          !cameraOverlayActiveRef.current
+      );
+      if (currentTrack?.mediaType === 'video' && !isStudioMode) {
+        isStudioModeRef.current = true;
+        setIsStudioMode(true);
+        showToast(studioT.studioActivatedToast, 'info');
+      } else {
+        if (!hasFullscreenBackdropOnly && !isStudioMode) {
+          isStudioModeRef.current = true;
+          setIsStudioMode(true);
+        }
+        showToast(studioT.recordArmedToast, 'info');
+      }
+      isRecordArmedRef.current = true;
+      setIsRecordArmed(true);
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate(18);
+        } catch {
+          // ignore
+        }
+      }
+    }, 600);
+  };
+
+  const handlePlayHoldCancel = () => {
+    window.clearTimeout(playHoldTimerRef.current);
+    setIsHoldingPlay(false);
+  };
+
+  const handlePlayButtonClick = () => {
+    if (playHoldTriggeredRef.current) {
+      playHoldTriggeredRef.current = false;
+      return;
+    }
+    if (isRecording) {
+      stopStudioRecording();
+      return;
+    }
+    if (isRecordArmed) {
+      void startStudioRecording();
+      return;
+    }
+    void togglePlay();
+  };
+
   return (
     <div
       data-app-version={APP_VERSION}
       onClick={handleStageBackgroundClick}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={handleStageDrop}
       className="min-h-[100dvh] bg-[#0a0a0c] text-gray-100 flex flex-col justify-between relative overflow-x-hidden"
     >
-      {/* FULL-SCREEN MULTI-LAYER REACTIVE CANVAS VISUALIZER */}
+      {/* UNIFIED FULL-SCREEN REACTIVE CANVAS + STUDIO FRAME + MP4 CAPTURE */}
       <VisualizerCanvas
+        canvasRef={masterCanvasRef}
+        studioFrameRef={studioFrameStateRef}
         analyser={analyser}
         isPlaying={isPlaying}
         vizMode={vizMode}
         paletteIndex={paletteIndex}
         visualDna={visualDna}
         isZenMode={!uiVisible}
+        studioActive={isStudioMode}
+        videoElement={videoRef.current}
+        customStageMedia={customStageMedia}
+        cameraOverlayActive={cameraOverlayActive}
+        customBgVideoElement={customBgVideoRef.current}
+        cameraVideoElement={cameraVideoRef.current}
+        activeCoverSrc={currentTrack?.cover}
+        activeMediaType={currentTrack?.mediaType}
+        coverFrameMotion={coverFrameMotion}
+        coverRotationTarget={coverRotationTarget}
+        coverCaptionTitle={showCoverCaption ? currentTrack?.title ?? null : null}
+        coverCaptionArtist={showCoverCaption ? currentTrack?.artist ?? null : null}
+        isRecordArmed={isRecordArmed}
+        recordAspect={recordAspect}
+        recordQuality={recordQuality}
+        isRecording={isRecording}
+        layeredBg={mixEnabled && visualDna.mixLayers.length > 0}
+        liveOrbsSnapshotRef={liveOrbsSnapshotRef}
+        onRandomizeStyle={() => randomizeVisual()}
+        onStudioToast={(msg) => showToast(msg, 'info')}
       />
 
-      {/* ZEN MODE: FLOATING CIRCULAR TRACK ORBS (2-5 ORBS) */}
-      {!uiVisible && showOrbs && (
+      {isRecordArmed && (
+        <StudioRecordBar
+          aspect={recordAspect}
+          quality={recordQuality}
+          renderMode={recordRenderMode}
+          uiVisible={uiVisible}
+          isRecording={isRecording}
+          hasCustomMedia={
+            Boolean(customStageMedia) ||
+            cameraOverlayActive ||
+            micEnabled ||
+            coverFrameMotion !== 'static' ||
+            coverRotationTarget !== 'none' ||
+            showCoverCaption
+          }
+          isLiveMediaActive={
+            customStageMedia?.kind === 'camera' || cameraOverlayActive || micEnabled
+          }
+          onChangeAspect={(next) => {
+            setRecordAspect(next);
+            const dims = getRecordingDimensions(next, recordQuality);
+            showToast(
+              studioT.aspectChangedToast(next, `${dims.exportWidth}×${dims.exportHeight}`),
+              'info'
+            );
+          }}
+          onChangeQuality={(next) => {
+            setRecordQuality(next);
+            const dims = getRecordingDimensions(recordAspect, next);
+            const pxText = next.replace('p', ' px');
+            showToast(
+              studioT.qualityChangedToast(pxText, `${dims.exportWidth}×${dims.exportHeight}`),
+              'info'
+            );
+          }}
+          onChangeRenderMode={(next) => {
+            if (
+              next === 'offline' &&
+              (customStageMedia?.kind === 'camera' || cameraOverlayActive || micEnabled)
+            ) {
+              showToast(studioT.customMediaLiveRequiredToast, 'info');
+              return;
+            }
+            setRecordRenderMode(next);
+            try {
+              localStorage.setItem(STORAGE_RECORD_RENDER_MODE_KEY, next);
+            } catch {
+              // ignore
+            }
+            showToast(
+              next === 'offline' ? studioT.renderModeOfflineToast : studioT.renderModeLiveToast,
+              'info'
+            );
+          }}
+          onOpenCustomMedia={() => setIsStageMediaOpen(true)}
+        />
+      )}
+
+      {/* LIVE STREAM RECORDING LOCK SCREEN + TOP PROGRESS BAR + STOP BUTTON */}
+      {isRecording && !offlineExportState && (
+        <>
+          <div
+            data-no-zen-toggle="true"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            aria-hidden="true"
+            className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[1.5px] cursor-not-allowed touch-none"
+          />
+
+          <div
+            data-no-zen-toggle="true"
+            role="status"
+            aria-live="polite"
+            className="fixed left-1/2 -translate-x-1/2 top-[max(0.75rem,env(safe-area-inset-top))] z-[45] w-[min(calc(100vw-1.5rem),28rem)] rounded-2xl bg-[#101118]/92 backdrop-blur-xl border border-rose-400/40 shadow-2xl shadow-black/80 px-4 py-3 space-y-2 pointer-events-none"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="relative flex h-2.5 w-2.5 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-85" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
+                </span>
+                <span className="text-xs sm:text-sm font-bold text-white truncate">
+                  {studioT.liveRecordingTitle}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 text-xs font-mono tabular-nums">
+                <span className="text-rose-300 font-bold">
+                  REC {formatTime(recordingElapsedSec)}
+                </span>
+                <span className="text-gray-300">
+                  {formatTime(currentTime)}
+                  {duration > 0 ? ` / ${formatTime(duration)}` : ''}
+                </span>
+                {duration > 0 && (
+                  <span className="text-amber-300 font-semibold">
+                    {Math.round(progressPercent)}%
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+              <div
+                style={{ width: `${duration > 0 ? Math.max(2, progressPercent) : 100}%` }}
+                className={`h-full bg-gradient-to-r from-red-500 via-rose-500 to-amber-400 transition-[width] duration-150 ${
+                  duration > 0 ? '' : 'animate-pulse'
+                }`}
+              />
+            </div>
+
+            <p className="text-[11px] text-gray-300 truncate">
+              {studioT.liveRecordingStreamHint}
+            </p>
+          </div>
+
+          <div
+            data-no-zen-toggle="true"
+            onClick={(e) => e.stopPropagation()}
+            className="fixed left-1/2 -translate-x-1/2 bottom-[max(0.85rem,env(safe-area-inset-bottom))] sm:bottom-5 z-[45]"
+          >
+            <button
+              type="button"
+              onClick={stopStudioRecording}
+              aria-label={studioT.recordingStopAria}
+              className="h-12 px-6 rounded-2xl bg-gradient-to-tr from-red-700 to-rose-500 hover:from-red-600 hover:to-rose-400 text-white font-bold text-sm flex items-center gap-2.5 shadow-2xl shadow-red-950/90 ring-2 ring-white/50 active:scale-95 transition cursor-pointer"
+            >
+              <Square className="w-4 h-4 fill-current shrink-0" />
+              <span>{studioT.liveRecordingStopBtn}</span>
+            </button>
+          </div>
+        </>
+      )}
+
+      {offlineExportState && (
+        <>
+          <div
+            data-no-zen-toggle="true"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            aria-hidden="true"
+            className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[1.5px] cursor-not-allowed touch-none"
+          />
+
+          <div
+            data-no-zen-toggle="true"
+            role="status"
+            aria-live="polite"
+            className="fixed left-1/2 -translate-x-1/2 top-[max(0.75rem,env(safe-area-inset-top))] z-[45] w-[min(calc(100vw-1.5rem),28rem)] rounded-2xl bg-[#101118]/92 backdrop-blur-xl border border-emerald-400/40 shadow-2xl shadow-black/80 px-4 py-3 space-y-2 pointer-events-none"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="relative flex h-2.5 w-2.5 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-85" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                </span>
+                <span className="text-xs sm:text-sm font-bold text-white truncate">
+                  {studioT.offlineExportTitle}
+                </span>
+              </div>
+              <span className="text-xs sm:text-sm font-mono tabular-nums font-bold text-emerald-300 shrink-0">
+                {Math.round(offlineExportState.progress * 100)}%
+              </span>
+            </div>
+
+            <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+              <div
+                style={{
+                  width: `${Math.max(2, Math.round(offlineExportState.progress * 100))}%`,
+                }}
+                className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-lime-400 transition-[width] duration-150"
+              />
+            </div>
+
+            <p className="text-[11px] text-gray-300 truncate">
+              {offlineExportState.stage === 'preparing'
+                ? studioT.offlineStagePreparing
+                : offlineExportState.stage === 'rendering'
+                ? studioT.offlineStageRendering
+                : studioT.offlineStageFinalizing}
+            </p>
+          </div>
+
+          <div
+            data-no-zen-toggle="true"
+            className="fixed inset-0 z-[43] flex items-center justify-center px-6 pointer-events-none"
+          >
+            <div className="max-w-md px-6 py-4 rounded-3xl bg-[#0d1016]/70 backdrop-blur-md border border-emerald-400/25 shadow-2xl shadow-black/70 text-center">
+              <p className="text-lg sm:text-2xl font-bold tracking-tight text-white drop-shadow-[0_2px_12px_rgba(16,185,129,0.35)]">
+                {studioT.offlineWaitMessage}
+              </p>
+            </div>
+          </div>
+
+          <div
+            data-no-zen-toggle="true"
+            onClick={(e) => e.stopPropagation()}
+            className="fixed left-1/2 -translate-x-1/2 bottom-[max(0.85rem,env(safe-area-inset-bottom))] sm:bottom-5 z-[45]"
+          >
+            <button
+              type="button"
+              onClick={() => offlineAbortRef.current?.abort()}
+              className="h-12 px-6 rounded-2xl bg-[#161922]/90 hover:bg-rose-600/35 border border-white/25 hover:border-rose-400/60 text-white font-bold text-sm flex items-center gap-2 shadow-2xl shadow-black/80 ring-1 ring-white/15 active:scale-95 transition cursor-pointer"
+            >
+              <X className="w-4 h-4 shrink-0" />
+              <span>{studioT.offlineCancelBtn}</span>
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* VIDEO ELEMENT (Fullscreen classic player by default; decoded off-opacity into Studio canvas when active) */}
+      <video
+        ref={videoRef}
+        crossOrigin="anonymous"
+        playsInline
+        onTimeUpdate={(e) => {
+          const el = e.currentTarget;
+          setCurrentTime(el.currentTime);
+          if (Number.isFinite(el.duration) && el.duration > 0) {
+            setDuration(el.duration);
+          }
+        }}
+        onLoadedMetadata={(e) => {
+          const el = e.currentTarget;
+          if (Number.isFinite(el.duration) && el.duration > 0) {
+            setDuration(el.duration);
+          }
+          const pending = pendingSeekRef.current;
+          if (
+            pending &&
+            (el.src === pending.src || el.currentSrc === pending.src || !pending.src)
+          ) {
+            pendingSeekRef.current = null;
+            const targetTime = Math.max(0, Math.min(pending.time, el.duration || pending.time));
+            if (targetTime > 0) {
+              try {
+                el.currentTime = targetTime;
+                setCurrentTime(targetTime);
+              } catch {
+                // ignore
+              }
+            }
+          }
+        }}
+        onEnded={() => {
+          if (isRecordingRef.current) {
+            const hasNextSlide =
+              playlistRef.current.length > 1 &&
+              !isShuffle &&
+              !isRepeat &&
+              currentIndexRef.current + 1 < playlistRef.current.length &&
+              playlistRef.current.some(
+                (item) => item.mediaType === 'image' || item.mediaType === 'video'
+              );
+            if (hasNextSlide) {
+              void selectTrack(currentIndexRef.current + 1, true, true);
+              return;
+            }
+            stopStudioRecording();
+            return;
+          }
+          if (isRepeat && videoRef.current) {
+            videoRef.current.currentTime = 0;
+            void videoRef.current.play();
+          } else {
+            nextTrack(true);
+          }
+        }}
+        onError={() => {
+          if (!isVideoTrack) return;
+          setIsPlaying(false);
+          if (isRecordingRef.current) {
+            stopStudioRecording();
+          }
+          showToast(t.streamErrorToast, 'error');
+        }}
+        className={
+          isClassicVideoPlayer
+            ? 'fixed inset-0 z-[5] w-full h-full object-contain bg-black cursor-pointer'
+            : 'fixed top-0 left-0 w-px h-px opacity-[0.001] pointer-events-none'
+        }
+      />
+
+      {/* DECOUPLED CUSTOM PHOTO/VIDEO STAGE ELEMENTS */}
+      <video
+        ref={customBgVideoRef}
+        playsInline
+        preload="auto"
+        onLoadedData={(e) => {
+          const el = e.currentTarget;
+          if (!isPlayingRef.current && !isRecordingRef.current && el.paused && el.currentTime < 0.01) {
+            try {
+              el.currentTime = 0.01;
+            } catch {
+              // ignore seek on load
+            }
+          }
+        }}
+        onEnded={() => {
+          if (stageMediaQueueRef.current.length > 1) {
+            advanceStageMedia(1);
+          }
+        }}
+        onError={() => {
+          if (customStageMediaRef.current?.kind === 'video') {
+            showToast(studioT.customMediaVideoDecodeErrorToast, 'error');
+          }
+        }}
+        className="fixed top-0 left-0 w-10 h-10 opacity-[0.01] pointer-events-none z-[1]"
+      />
+      <video
+        ref={cameraVideoRef}
+        autoPlay
+        muted
+        playsInline
+        className="fixed top-0 left-0 w-10 h-10 opacity-[0.01] pointer-events-none z-[1]"
+      />
+      <input
+        ref={customBgInputRef}
+        type="file"
+        multiple
+        accept="image/*,video/*"
+        className="hidden"
+        onChange={(e) => {
+          handlePickStageMediaFiles(e.target.files);
+          e.target.value = '';
+        }}
+      />
+      <input
+        ref={(el) => {
+          reselectFolderInputRef.current = el;
+          if (el) {
+            el.webkitdirectory = true;
+            el.setAttribute('webkitdirectory', '');
+            el.setAttribute('directory', '');
+          }
+        }}
+        type="file"
+        multiple
+        accept="audio/*,video/mp4,video/webm,video/quicktime,image/*,.mp3,.wav,.flac,.ogg,.m4a,.aac,.mp4,.webm,.mov,.m4v,.jpg,.jpeg,.png,.webp"
+        className="hidden"
+        onChange={(e) => {
+          void handleSelectFolderInputFiles(e.target.files);
+          e.target.value = '';
+        }}
+      />
+
+      {/* ZEN MODE: FLOATING CIRCULAR TRACK ORBS (AUDIO MODE ONLY; hidden in Record Armed/Active or Clean Fullscreen backdrop) */}
+      {!uiVisible &&
+        showOrbs &&
+        !isStudioMode &&
+        !isRecordArmed &&
+        !isRecording &&
+        !isClassicVideoPlayer &&
+        !isImageTrack &&
+        !(
+          !cameraOverlayActive &&
+          customStageMedia?.displayMode === 'backdrop' &&
+          customStageMedia.backdropOverlay === 'clean'
+        ) && (
         <FloatingTrackOrbs
           tracks={playlist}
           currentIndex={currentIndex}
@@ -1880,13 +4535,26 @@ export default function App() {
           analyser={analyser}
           showCaptions={showOrbCaptions}
           isLayeredBackground={mixEnabled && visualDna.mixLayers.length > 0}
+          snapshotRef={liveOrbsSnapshotRef}
           onSelectTrack={(idx) => void selectTrack(idx, true)}
           onTogglePlay={() => void togglePlay()}
         />
       )}
 
       {/* TOAST NOTIFICATIONS */}
-      <div className="fixed top-20 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+      <div
+        className={`fixed right-4 z-[80] flex flex-col gap-2 max-w-[calc(100vw-2rem)] sm:max-w-md pointer-events-none transition-[top] duration-200 ${
+          isRecording
+            ? 'top-[136px] sm:top-[140px]'
+            : isRecordArmed
+            ? uiVisible
+              ? 'top-[122px] sm:top-[128px]'
+              : 'top-[66px]'
+            : uiVisible
+            ? 'top-20'
+            : 'top-4'
+        }`}
+      >
         {toasts.map((t) => (
           <div
             key={t.id}
@@ -1932,34 +4600,20 @@ export default function App() {
               <span className="sr-only">YRitmX</span>
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                viewBox="16 8 342 84"
+                viewBox="0 0 1723.25 546.98"
+                shapeRendering="geometricPrecision"
                 aria-hidden="true"
                 className="h-6 sm:h-7 w-auto block"
               >
                 <path
-                  fill="#68e524"
-                  d="M21 26h10.5L43 55.5L54.5 26H65L41.5 88H31l7-18.5L21 26z"
+                  fill="lime"
+                  fillRule="nonzero"
+                  d="M-0 128.11l80.31 0 100.58 152.25 69.75 -152.25 80.12 0 -254.26 417.61 -17.82 1.26 90.38 -200.71 -149.05 -218.16zm1404.89 0l90.99 0 56.08 97.2 67.03 -97.2 89.72 0 -119.51 167.47 134.05 251.06 -14.71 0.31 -151.34 -208.95 -73.75 102.15 -89.72 0 118.41 -164.15 -107.24 -147.89z"
                 />
                 <path
-                  fill="#ffffff"
-                  d="M78 26h9.5v8.5C90.5 28.5 95.5 25 102.5 25c8.5 0 13.5 5.5 13.5 15v7h-9.5v-6c0-4.5-2.5-7-6.5-7-4.5 0-8 3-8 8.5V76H78V26z"
-                />
-                <circle fill="#ffffff" cx="148" cy="11" r="6" />
-                <path
-                  fill="#ffffff"
-                  d="M132 26h21v41h13v9h-36v-9h13V35h-11v-9z"
-                />
-                <path
-                  fill="#ffffff"
-                  d="M191 14h10v12h14v9h-14v41h-10V35h-12v-9h12V14z"
-                />
-                <path
-                  fill="#ffffff"
-                  d="M230 26h9v6.5c2.5-4.5 6.5-7.5 12-7.5 5.5 0 9.5 2.5 11.5 7.5 3-5 7.5-7.5 13-7.5 8 0 12.5 5.5 12.5 15v36h-9V41.5c0-5-2-7.5-6-7.5-4 0-6.5 3-6.5 8V76h-9V41.5c0-5-2-7.5-6-7.5-4 0-6.5 3-6.5 8V76h-9V26z"
-                />
-                <path
-                  fill="#b2ed11"
-                  d="M300 26h11.5l11.5 17.5L334.5 26H346l-17 24.5L355 88h-11.5l-20.5-30.5L310.5 76H299l18-25.5L300 26z"
+                  fill="#EDEDED"
+                  fillRule="nonzero"
+                  d="M357.49 128.11l67.58 0 0 39.67c7.25,-15.48 16.85,-27.23 28.79,-35.26 12.05,-8.03 25.17,-12.05 39.38,-12.05 10.09,0 20.67,2.64 31.73,8.03l-24.29 67.58c-9.11,-4.6 -16.65,-6.86 -22.53,-6.86 -11.95,0 -22.13,7.45 -30.36,22.34 -8.33,14.88 -12.44,44.07 -12.44,87.56l0.3 15.18 0 125.86 -78.16 0 0 -312.04zm237.22 -128.11c13.71,0 25.47,5 35.26,14.89 9.89,9.9 14.79,21.84 14.79,35.95 0,13.91 -4.9,25.76 -14.6,35.55 -9.7,9.8 -21.35,14.69 -34.97,14.69 -13.9,0 -25.76,-5 -35.55,-14.99 -9.89,-9.99 -14.79,-22.13 -14.79,-36.43 0,-13.72 4.9,-25.37 14.6,-35.06 9.7,-9.7 21.45,-14.6 35.26,-14.6zm-39.28 128.11l78.16 0 0 312.04 -78.16 0 0 -312.04zm158.47 -115.18l78.16 0 0 115.18 46.43 0 0 67.58 -46.43 0 0 244.46 -78.16 0 0 -244.46 -39.96 0 0 -67.58 39.96 0 0 -115.18zm166.21 115.18l78.16 0 0 36.43c13.42,-14.79 28.3,-25.85 44.76,-33.1 16.35,-7.35 34.27,-10.97 53.67,-10.97 19.5,0 37.22,4.8 52.89,14.4 15.77,9.6 28.41,23.7 38.01,42.12 12.44,-18.41 27.71,-32.52 45.84,-42.12 18.12,-9.59 38,-14.4 59.45,-14.4 22.23,0 41.83,5.19 58.67,15.48 16.94,10.28 28.99,23.8 36.43,40.35 7.34,16.64 11.07,43.68 11.07,81.1l0 182.76 -78.16 0 0 -157.69c0,-35.26 -4.41,-59.16 -13.32,-71.59 -8.91,-12.44 -22.34,-18.71 -40.06,-18.71 -13.61,0 -25.76,3.82 -36.43,11.46 -10.77,7.54 -18.8,18.12 -23.99,31.53 -5.19,13.42 -7.84,34.97 -7.84,64.74l0 140.25 -78.16 0 0 -150.54c0,-27.81 -2.05,-47.99 -6.27,-60.43 -4.12,-12.54 -10.38,-21.75 -18.61,-27.92 -8.33,-6.07 -18.41,-9.11 -30.16,-9.11 -13.13,0 -25.08,3.82 -35.75,11.56 -10.77,7.73 -18.71,18.51 -24.09,32.41 -5.29,13.91 -7.93,35.85 -7.93,65.72l0 138.3 -78.16 0 0 -312.04z"
                 />
               </svg>
             </h1>
@@ -2031,6 +4685,35 @@ export default function App() {
 
             <button
               type="button"
+              onClick={() => setIsStageMediaOpen(true)}
+              aria-pressed={
+                Boolean(customStageMedia) ||
+                cameraOverlayActive ||
+                coverFrameMotion !== 'static' ||
+                coverRotationTarget !== 'none' ||
+                showCoverCaption
+              }
+              title={studioT.customMediaTitle}
+              className={`px-3 py-2 text-xs font-semibold rounded-lg border transition flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+                customStageMedia ||
+                cameraOverlayActive ||
+                coverFrameMotion !== 'static' ||
+                coverRotationTarget !== 'none' ||
+                showCoverCaption
+                  ? 'bg-fuchsia-600/25 text-fuchsia-100 border-fuchsia-400/50 shadow-sm shadow-fuchsia-950/40'
+                  : 'bg-white/5 text-gray-200 border-white/10 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              <ImagePlus className="w-3.5 h-3.5 text-fuchsia-300" />
+              <span>
+                {customStageMedia || cameraOverlayActive
+                  ? studioT.customMediaActiveBtn
+                  : studioT.customMediaBtn}
+              </span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => {
                 setIsEqOpen(true);
                 trackEvent('modal_open', { modal: 'equalizer' });
@@ -2095,6 +4778,19 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
+              setIsHelpOpen(true);
+              trackEvent('modal_open', { modal: 'help' });
+            }}
+            aria-label={helpT.helpBtnLabel}
+            title={helpT.helpBtnLabel}
+            className="p-2.5 rounded-xl glass text-gray-200 hover:text-white hover:bg-white/10 transition cursor-pointer"
+          >
+            <HelpCircle className="w-5 h-5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
               setIsMobileMenuOpen(true);
               trackEvent('modal_open', { modal: 'menu' });
             }}
@@ -2108,11 +4804,28 @@ export default function App() {
       </header>
 
       {/* MAIN STAGE */}
-      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-4 py-3 lg:px-6 lg:py-4 [@media(max-height:540px)_and_(orientation:landscape)]:py-1.5 grid grid-cols-1 md:grid-cols-12 landscape:grid-cols-12 gap-4 lg:gap-6 items-center cursor-pointer select-none">
-        {/* LEFT/CENTER: CLICKABLE ALBUM ART (Hidden when Zen Floating Orbs take over) */}
+      <main
+        className={`relative z-10 flex-1 max-w-7xl w-full mx-auto px-4 py-3 lg:px-6 lg:py-4 [@media(max-height:540px)_and_(orientation:landscape)]:py-1.5 grid grid-cols-1 md:grid-cols-12 landscape:grid-cols-12 gap-4 lg:gap-6 items-center select-none ${
+          isStudioMode || isClassicVideoPlayer || isRecordArmed
+            ? 'pointer-events-none opacity-0'
+            : 'cursor-pointer'
+        }`}
+      >
+        {/* LEFT/CENTER: CLICKABLE ALBUM ART (Hidden when Zen Floating Orbs, Studio Mode, Fullscreen Custom Backdrop, or Armed Recording take over) */}
         <section
           className={`md:col-span-6 lg:col-span-7 landscape:col-span-6 lg:landscape:col-span-7 flex flex-col items-center justify-center text-center py-2 lg:py-4 [@media(max-height:540px)_and_(orientation:landscape)]:py-0 transition-all duration-300 ${
-            uiVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-50 pointer-events-none'
+            uiVisible &&
+            !isStudioMode &&
+            !isClassicVideoPlayer &&
+            !isRecordArmed &&
+            !(
+              customStageMedia &&
+              !isVideoTrack &&
+              !isImageTrack &&
+              (cameraOverlayActive || customStageMedia.displayMode === 'backdrop')
+            )
+              ? 'opacity-100 scale-100'
+              : 'opacity-0 scale-50 pointer-events-none'
           }`}
         >
           <button
@@ -2192,34 +4905,31 @@ export default function App() {
           )}
 
           {/* DESKTOP VISUALIZATION & MIX CONTROLS */}
-          <div className="hidden lg:flex flex-wrap items-center justify-center gap-2 mt-4 xl:mt-6 [@media(max-height:660px)]:mt-3">
-            <div
-              data-no-zen-toggle="true"
-              className="glass px-3 py-2 rounded-xl flex items-center gap-2 cursor-default"
-            >
-              <label htmlFor="desktop-viz-select" className="text-xs text-gray-400 whitespace-nowrap">
-                {t.visualLabel}
-              </label>
-              <select
-                id="desktop-viz-select"
-                value={vizMode}
-                onChange={(e) => {
-                  const id = parseInt(e.target.value, 10);
-                  setVizMode(id);
-                  trackEvent('visualizer_mode_change', {
-                    mode_id: id,
-                    mode_label: VIZ_MODES[id]?.label,
-                  });
-                }}
-                className="bg-transparent text-xs text-purple-300 font-semibold focus:outline-none cursor-pointer max-w-[190px]"
+          <div className="hidden lg:flex flex-col items-center gap-2 mt-4 xl:mt-6 [@media(max-height:660px)]:mt-3">
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <div
+                data-no-zen-toggle="true"
+                className="glass px-3 py-2 rounded-xl flex items-center gap-2 cursor-default"
               >
-                {VIZ_MODES.map((m) => (
-                  <option key={m.id} value={m.id} className="bg-gray-900 text-gray-100">
-                    {t.vizModes[m.id] ?? m.label}
+                <label htmlFor="desktop-viz-select" className="text-xs text-gray-400 whitespace-nowrap">
+                  {t.visualLabel}
+                </label>
+                <select
+                  id="desktop-viz-select"
+                  value={isCarouselMode ? VIZ_CAROUSEL_MODE_ID : vizMode}
+                  onChange={(e) => handleSelectVizModeOrCarousel(parseInt(e.target.value, 10))}
+                  className="bg-transparent text-xs text-purple-300 font-semibold focus:outline-none cursor-pointer max-w-[190px]"
+                >
+                  <option value={VIZ_CAROUSEL_MODE_ID} className="bg-gray-900 text-purple-300 font-semibold">
+                    {studioT.carouselModeLabel}
                   </option>
-                ))}
-              </select>
-            </div>
+                  {VIZ_MODES.map((m) => (
+                    <option key={m.id} value={m.id} className="bg-gray-900 text-gray-100">
+                      {t.vizModes[m.id] ?? m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
             <div
               data-no-zen-toggle="true"
@@ -2291,6 +5001,35 @@ export default function App() {
               <Sparkles className="w-3.5 h-3.5" />
               <span>{t.autoBgBtn}</span>
             </button>
+            </div>
+
+            {isCarouselMode && (
+              <div
+                data-no-zen-toggle="true"
+                role="group"
+                aria-label={studioT.carouselIntervalAria}
+                className="flex flex-wrap items-center justify-center gap-1.5"
+              >
+                {CAROUSEL_INTERVAL_OPTIONS.map((sec) => {
+                  const active = carouselIntervalSec === sec;
+                  return (
+                    <button
+                      key={sec}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => handleChangeCarouselInterval(sec)}
+                      className={`px-2.5 py-1 rounded-lg border text-xs font-semibold tabular-nums transition cursor-pointer ${
+                        active
+                          ? 'bg-purple-600/35 border-purple-400 text-white shadow-sm shadow-purple-950/40'
+                          : 'glass border-white/10 text-gray-300 hover:bg-white/10 hover:text-white'
+                      }`}
+                    >
+                      {studioT.carouselSecondsBtn(sec)}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </section>
 
@@ -2356,18 +5095,30 @@ export default function App() {
               aria-valuenow={Math.floor(currentTime)}
               onClick={(e) => handleSeek(e.clientX, e.currentTarget.getBoundingClientRect())}
               onKeyDown={(e) => {
-                const audioEl = audioRef.current;
-                if (!audioEl || !duration) return;
+                if (currentTrack?.mediaType === 'image') {
+                  if (e.key === 'ArrowRight') {
+                    const nextTime = Math.min(IMAGE_SLIDE_DURATION_SEC, imageElapsedRef.current + 1);
+                    imageElapsedRef.current = nextTime;
+                    setCurrentTime(nextTime);
+                  } else if (e.key === 'ArrowLeft') {
+                    const nextTime = Math.max(0, imageElapsedRef.current - 1);
+                    imageElapsedRef.current = nextTime;
+                    setCurrentTime(nextTime);
+                  }
+                  return;
+                }
+                const mediaEl = getActiveMediaElement();
+                if (!mediaEl || !duration) return;
                 if (e.key === 'ArrowRight') {
                   pendingSeekRef.current = null;
-                  audioEl.currentTime = Math.min(duration, audioEl.currentTime + 5);
-                  setCurrentTime(audioEl.currentTime);
-                  persistCurrentSession({ currentTime: audioEl.currentTime });
+                  mediaEl.currentTime = Math.min(duration, mediaEl.currentTime + 5);
+                  setCurrentTime(mediaEl.currentTime);
+                  persistCurrentSession({ currentTime: mediaEl.currentTime });
                 } else if (e.key === 'ArrowLeft') {
                   pendingSeekRef.current = null;
-                  audioEl.currentTime = Math.max(0, audioEl.currentTime - 5);
-                  setCurrentTime(audioEl.currentTime);
-                  persistCurrentSession({ currentTime: audioEl.currentTime });
+                  mediaEl.currentTime = Math.max(0, mediaEl.currentTime - 5);
+                  setCurrentTime(mediaEl.currentTime);
+                  persistCurrentSession({ currentTime: mediaEl.currentTime });
                 }
               }}
               className="flex-1 relative group cursor-pointer py-2 focus-visible:outline-none"
@@ -2442,11 +5193,42 @@ export default function App() {
               <button
                 type="button"
                 data-play-toggle="true"
-                onClick={() => void togglePlay()}
-                aria-label={isPlaying ? t.pauseLabel : t.playLabel}
-                className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-purple-900/50 hover:scale-105 transition cursor-pointer"
+                onPointerDown={handlePlayHoldStart}
+                onPointerUp={handlePlayHoldCancel}
+                onPointerLeave={handlePlayHoldCancel}
+                onPointerCancel={handlePlayHoldCancel}
+                onClick={handlePlayButtonClick}
+                title={studioT.holdPlayHintTitle}
+                aria-label={
+                  isRecording
+                    ? studioT.recordingStopAria
+                    : isRecordArmed
+                    ? studioT.recordPlayAria
+                    : isPlaying
+                    ? t.pauseLabel
+                    : t.playLabel
+                }
+                className={`relative w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-lg transition-all duration-300 cursor-pointer select-none touch-none ${
+                  isRecording
+                    ? 'bg-gradient-to-tr from-red-700 to-rose-500 shadow-red-900/70 ring-2 ring-red-300/80 scale-105'
+                    : isRecordArmed
+                    ? 'bg-gradient-to-tr from-red-600 to-rose-500 shadow-red-900/60 ring-2 ring-white/40 hover:scale-105'
+                    : isHoldingPlay
+                    ? 'bg-gradient-to-tr from-rose-600 to-purple-600 shadow-rose-900/60 ring-2 ring-rose-400/70 scale-95'
+                    : 'bg-gradient-to-tr from-purple-600 to-pink-500 shadow-purple-900/50 hover:scale-105'
+                }`}
               >
-                {isPlaying ? (
+                {isRecording ? (
+                  <Square className="w-5 h-5 fill-current" />
+                ) : isRecordArmed ? (
+                  <>
+                    <Video className="w-5 h-5" />
+                    <span
+                      aria-hidden="true"
+                      className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-white"
+                    />
+                  </>
+                ) : isPlaying ? (
                   <Pause className="w-5 h-5 fill-current" />
                 ) : (
                   <Play className="w-5 h-5 fill-current ml-0.5" />
@@ -2558,11 +5340,56 @@ export default function App() {
             }
           }
         }}
-        onEnded={() => {
+        onPause={(e) => {
+          const el = e.currentTarget;
+          if (isRecordingRef.current && isPlayingRef.current && !el.ended) {
+            window.setTimeout(() => {
+              if (isRecordingRef.current && isPlayingRef.current && el.paused && !el.ended) {
+                void el.play().catch(() => {});
+              }
+            }, 60);
+          }
+        }}
+        onEnded={(e) => {
+          const el = e.currentTarget;
+          // Guard against remote audio CDN connections truncating prematurely mid-track during recording
+          if (
+            isRecordingRef.current &&
+            Number.isFinite(el.duration) &&
+            el.duration > 10 &&
+            el.currentTime < el.duration - 2.5 &&
+            el.src
+          ) {
+            pendingSeekRef.current = { src: el.src, time: el.currentTime };
+            el.load();
+            void el.play().catch(() => {});
+            return;
+          }
+
           trackEvent('track_complete', {
             track_title: currentTrack?.title,
             repeat: isRepeat,
           });
+          if (isRecordingRef.current) {
+            if (isRepeat) {
+              el.currentTime = 0;
+              void el.play().catch(() => {});
+              return;
+            }
+            const hasLiveSession =
+              cameraOverlayActiveRef.current ||
+              customStageMediaRef.current?.kind === 'camera' ||
+              micEnabledRef.current;
+            if (hasLiveSession) {
+              if (playlistRef.current.length > 1) {
+                const nextIdx = (currentIndexRef.current + 1) % playlistRef.current.length;
+                void selectTrack(nextIdx, true, true);
+              }
+              return;
+            }
+            stopStudioRecording();
+            return;
+          }
           if (isRepeat && audioRef.current) {
             audioRef.current.currentTime = 0;
             void audioRef.current.play();
@@ -2573,8 +5400,26 @@ export default function App() {
         onError={() => {
           if (playlist.length === 0) return;
           pendingSeekRef.current = null;
-          setIsPlaying(false);
           trackEvent('stream_error', { track_title: currentTrack?.title });
+          if (isRecordingRef.current) {
+            const hasLiveSession =
+              cameraOverlayActiveRef.current ||
+              customStageMediaRef.current?.kind === 'camera' ||
+              micEnabledRef.current;
+            if (hasLiveSession) {
+              showToast(t.streamErrorToast, 'error');
+              if (playlistRef.current.length > 1) {
+                const nextIdx = (currentIndexRef.current + 1) % playlistRef.current.length;
+                void selectTrack(nextIdx, true, true);
+              }
+              return;
+            }
+            setIsPlaying(false);
+            stopStudioRecording();
+            showToast(t.streamErrorToast, 'error');
+            return;
+          }
+          setIsPlaying(false);
           showToast(t.streamErrorToast, 'error');
         }}
       />
@@ -2621,20 +5466,18 @@ export default function App() {
         isOpen={isMobileMenuOpen}
         onClose={() => setIsMobileMenuOpen(false)}
         vizMode={vizMode}
+        isCarouselMode={isCarouselMode}
+        carouselIntervalSec={carouselIntervalSec}
         paletteIndex={paletteIndex}
         autoVisualPerTrack={autoVisualPerTrack}
         mixEnabled={mixEnabled}
         showOrbs={showOrbs}
         showOrbCaptions={showOrbCaptions}
+        hasCustomStageMedia={Boolean(customStageMedia) || cameraOverlayActive}
         isAppInstalled={isInstalled}
         isFullscreen={isNativeFullscreen}
-        onChangeVizMode={(id) => {
-          setVizMode(id);
-          trackEvent('visualizer_mode_change', {
-            mode_id: id,
-            mode_label: VIZ_MODES[id]?.label,
-          });
-        }}
+        onChangeVizMode={handleSelectVizModeOrCarousel}
+        onChangeCarouselInterval={handleChangeCarouselInterval}
         onChangePalette={(id) => {
           setPaletteIndex(id);
           trackEvent('visualizer_palette_change', {
@@ -2652,10 +5495,15 @@ export default function App() {
         onToggleMix={toggleMixEnabled}
         onToggleOrbs={toggleOrbs}
         onToggleOrbCaptions={toggleOrbCaptions}
+        onOpenStageMedia={() => setIsStageMediaOpen(true)}
         onOpenSources={(tab) => openSources(tab)}
         onOpenEqualizer={() => {
           setIsEqOpen(true);
           trackEvent('modal_open', { modal: 'equalizer' });
+        }}
+        onOpenHelp={() => {
+          setIsHelpOpen(true);
+          trackEvent('modal_open', { modal: 'help' });
         }}
         onToggleUI={() => {
           setUiVisible(false);
@@ -2663,6 +5511,49 @@ export default function App() {
         }}
         onToggleFullscreen={() => void handleToggleFullscreen()}
         onInstallApp={() => void handleInstallApp()}
+      />
+
+      <StageMediaModal
+        isOpen={isStageMediaOpen}
+        customMedia={customStageMedia}
+        activeTrackTitle={currentTrack?.title}
+        activeTrackArtist={currentTrack?.artist}
+        activeTrackCover={currentTrack?.cover}
+        coverFrameMotion={coverFrameMotion}
+        coverRotationTarget={coverRotationTarget}
+        showCoverCaption={showCoverCaption}
+        fileQueueCount={stageMediaQueue.length}
+        fileQueueIndex={stageMediaIndex}
+        cameraOverlayActive={cameraOverlayActive}
+        trackVolume={volume}
+        isTrackMuted={isMuted}
+        micEnabled={micEnabled}
+        micVolume={micVolume}
+        micEchoFilter={micEchoFilter}
+        onClose={() => setIsStageMediaOpen(false)}
+        onTriggerPickFile={() => customBgInputRef.current?.click()}
+        onPrevFileItem={() => advanceStageMedia(-1)}
+        onNextFileItem={() => advanceStageMedia(1)}
+        onToggleCamera={() => void handleToggleCamera()}
+        onFlipCamera={() => void handleFlipCamera()}
+        onToggleMic={() => void handleToggleMicrophone()}
+        onToggleMicEchoFilter={() => void handleToggleMicEchoFilter()}
+        onToggleFrameMotion={handleToggleFrameMotion}
+        onToggleFrameRotation={handleToggleFrameRotation}
+        onSelectRotationTarget={handleSelectRotationTarget}
+        onToggleCoverCaption={handleToggleCoverCaption}
+        onActivateBackdrop={handleActivateBackdrop}
+        onSelectBackdropOverlay={handleSelectBackdropOverlay}
+        onChangeTrackVolume={(nextVol) => {
+          const clamped = Math.max(0, Math.min(1, nextVol));
+          setVolume(clamped);
+          if (clamped > 0 && isMuted) setIsMuted(false);
+        }}
+        onToggleSound={handleToggleStageMediaSound}
+        onChangeSoundVolume={handleChangeStageMediaVolume}
+        onChangeMicVolume={(vol) => setMicVolume(Math.max(0, Math.min(1.5, vol)))}
+        onRemoveFileMedia={handleRemoveFileMedia}
+        onClearMedia={handleClearStageMedia}
       />
 
       <PWAInstallGuideModal
@@ -2696,6 +5587,8 @@ export default function App() {
         onTriggerDemo={() => void handleTriggerDemo()}
         onOpenFolderSource={() => openSources('folder')}
       />
+
+      <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
     </div>
   );
 }

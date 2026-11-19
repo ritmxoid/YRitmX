@@ -1,3 +1,30 @@
+export type MediaKind = 'audio' | 'video' | 'image';
+export type RecordAspectRatio = '9:16' | '1:1' | '16:9';
+export type RecordQualityPreset = '480p' | '720p' | '1080p';
+export type RecordRenderMode = 'live' | 'offline';
+export type StageMediaDisplayMode = 'frame' | 'backdrop';
+export type FrameMotionMode = 'static' | 'floating';
+export type FrameRotationTarget = 'none' | 'frame-only' | 'both' | 'media-only';
+export type BackdropOverlayMode = 'visualizer' | 'orb-only' | 'clean';
+
+export interface StageMediaItem {
+  kind: 'image' | 'video';
+  src: string;
+  name: string;
+}
+
+export interface CustomStageMedia {
+  kind: 'image' | 'video' | 'camera';
+  src: string;
+  name: string;
+  displayMode: StageMediaDisplayMode;
+  frameMotion: FrameMotionMode;
+  frameRotationTarget: FrameRotationTarget;
+  backdropOverlay: BackdropOverlayMode;
+  soundEnabled: boolean;
+  soundVolume: number;
+}
+
 export interface Track {
   id: string;
   title: string;
@@ -5,8 +32,10 @@ export interface Track {
   cover: string;
   src: string;
   sourceName: string;
+  mediaType?: MediaKind;
   durationHint?: number;
   isObjectUrl?: boolean;
+  isRadio?: boolean;
 }
 
 export interface ToastMessage {

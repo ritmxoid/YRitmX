@@ -1,5 +1,5 @@
 import { Pause, Play } from 'lucide-react';
-import { useEffect, useId, useMemo, useRef } from 'react';
+import { MutableRefObject, useEffect, useId, useMemo, useRef } from 'react';
 import { DEFAULT_COVER_IMAGE } from '../constants/visualizer';
 import { useI18n } from '../i18n/I18nContext';
 import { Track } from '../types/audio';
@@ -15,6 +15,7 @@ import {
   pickTrackOrbStyle,
   renderOrbFxFrame,
 } from '../utils/orbEffectsRenderer';
+import { LiveOrbSnapshot } from '../utils/studioFrameRenderer';
 
 interface FloatingTrackOrbsProps {
   tracks: Track[];
@@ -23,6 +24,7 @@ interface FloatingTrackOrbsProps {
   analyser: AnalyserNode | null;
   showCaptions: boolean;
   isLayeredBackground?: boolean;
+  snapshotRef?: MutableRefObject<LiveOrbSnapshot[]>;
   onSelectTrack: (index: number) => void;
   onTogglePlay: () => void;
 }
@@ -57,6 +59,8 @@ interface OrbPhysics {
   wobblePhase: number;
   impactAngleRad: number;
   flash: number;
+  breathScale: number;
+  breathOpacityMult: number;
 }
 
 interface CollisionSpark {
@@ -136,6 +140,7 @@ export function FloatingTrackOrbs({
   analyser,
   showCaptions,
   isLayeredBackground = false,
+  snapshotRef,
   onSelectTrack,
   onTogglePlay,
 }: FloatingTrackOrbsProps) {
@@ -145,8 +150,8 @@ export function FloatingTrackOrbs({
   const orbRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const coverRefs = useRef<(HTMLDivElement | null)[]>([]);
   const hoverTextRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const livePropsRef = useRef({ isPlaying, analyser, isLayeredBackground });
-  livePropsRef.current = { isPlaying, analyser, isLayeredBackground };
+  const livePropsRef = useRef({ isPlaying, analyser, isLayeredBackground, snapshotRef });
+  livePropsRef.current = { isPlaying, analyser, isLayeredBackground, snapshotRef };
 
   // Active track orb + 1 to 4 random companion track orbs (2 to 5 spheres total)
   // Each track change picks fresh effects (13 modes) and morphed shapes (circles, stars, polygons, hearts)
@@ -173,13 +178,23 @@ export function FloatingTrackOrbs({
     const activeSize = isMobile ? 96 : 116;
 
     const trackStyle = pickTrackOrbStyle();
+    const isSingleRadio =
+      tracks.length === 1 &&
+      Boolean(activeTrack.isRadio || activeTrack.sourceName === 'RadioFM');
     const totalOrbs = 1 + selectedCompanions.length;
     const shapedSlot = Math.floor(Math.random() * totalOrbs);
-    const activeShape: OrbShape = shapedSlot === 0 ? trackStyle.shape : 'circle';
+    const activeShape: OrbShape = isSingleRadio
+      ? 'circle'
+      : shapedSlot === 0
+      ? trackStyle.shape
+      : 'circle';
+    const orbTrack = isSingleRadio
+      ? { ...activeTrack, title: 'RadioFM' }
+      : activeTrack;
 
     return [
       {
-        track: activeTrack,
+        track: orbTrack,
         indexInPlaylist: currentIndex,
         isActive: true,
         size: activeSize,
@@ -261,6 +276,8 @@ export function FloatingTrackOrbs({
         wobblePhase: 0,
         impactAngleRad: 0,
         flash: 0,
+        breathScale: 1,
+        breathOpacityMult: 1,
       };
     });
 
@@ -320,6 +337,19 @@ export function FloatingTrackOrbs({
     let animId = 0;
     let frameCounter = 0;
 
+    // Sequential per-track breathing queue (at most once per orb per track, never simultaneous)
+    const breathQueue = physics.map((_, idx) => idx);
+    for (let k = breathQueue.length - 1; k > 0; k--) {
+      const swapIdx = Math.floor(Math.random() * (k + 1));
+      const tmp = breathQueue[k];
+      breathQueue[k] = breathQueue[swapIdx];
+      breathQueue[swapIdx] = tmp;
+    }
+    let breathCursor = 0;
+    let activeBreathIdx = -1;
+    let breathProgress = 0;
+    let breathCooldown = 140 + Math.floor(Math.random() * 140);
+
     const tick = () => {
       animId = requestAnimationFrame(tick);
       frameCounter += 1;
@@ -333,6 +363,62 @@ export function FloatingTrackOrbs({
         isPlaying: playing,
         isLayeredBackground: layeredBg,
       } = livePropsRef.current;
+
+      if (playing && physics.length > 0) {
+        if (activeBreathIdx === -1) {
+          if (breathCursor < breathQueue.length) {
+            if (breathCooldown > 0) {
+              breathCooldown -= 1;
+            } else {
+              activeBreathIdx = breathQueue[breathCursor];
+              breathCursor += 1;
+              breathProgress = 0;
+            }
+          }
+        } else {
+          const bp = physics[activeBreathIdx];
+          if (bp) {
+            if (bp.fxMode === 'canvas_bloom') {
+              breathProgress += 0.00125;
+              if (breathProgress >= 1) {
+                bp.breathScale = 1;
+                bp.breathOpacityMult = 1;
+                activeBreathIdx = -1;
+                breathProgress = 0;
+                breathCooldown = 200 + Math.floor(Math.random() * 160);
+              } else {
+                const bell = 0.5 - 0.5 * Math.cos(breathProgress * Math.PI * 2);
+                const minDim = Math.max(240, Math.min(width, height));
+                const peakScale = Math.max(2.6, (minDim * 0.88) / bp.size);
+                bp.breathScale = 1 + (peakScale - 1) * bell;
+                const fadeEnv = Math.pow(bell, 0.45);
+                bp.breathOpacityMult = Math.max(0.08, 1 - fadeEnv * 0.9);
+              }
+            } else {
+              breathProgress += 0.0014;
+              if (breathProgress >= 1) {
+                bp.breathScale = 1;
+                bp.breathOpacityMult = 1;
+                activeBreathIdx = -1;
+                breathProgress = 0;
+                breathCooldown = 210 + Math.floor(Math.random() * 180);
+              } else if (breathProgress < 0.5) {
+                const u = breathProgress * 2;
+                const bell = 0.5 - 0.5 * Math.cos(u * Math.PI * 2);
+                bp.breathScale = 1 + 1.0 * bell;
+                bp.breathOpacityMult = 1;
+              } else {
+                const u = (breathProgress - 0.5) * 2;
+                const bell = 0.5 - 0.5 * Math.cos(u * Math.PI * 2);
+                bp.breathScale = 1 - 0.5 * bell;
+                bp.breathOpacityMult = 1;
+              }
+            }
+          } else {
+            activeBreathIdx = -1;
+          }
+        }
+      }
 
       let rawBass = 0.07;
       let rawMid = 0.07;
@@ -403,21 +489,26 @@ export function FloatingTrackOrbs({
         p.vx += Math.sin(p.phase * 0.78 + i * 2.1) * wander;
         p.vy += Math.cos(p.phase * 0.92 + i * 1.7) * wander;
 
+        const halfBase = p.size / 2;
+        const effectiveHalf = p.breathScale > 2.2 ? halfBase : halfBase * p.breathScale;
+        const cxOrb = p.x + halfBase;
+        const cyOrb = p.y + halfBase;
+
         const edgeMargin = 24 * (1 - intenseBoost * 0.65);
         const edgeSteerStrength = 0.042 * (1 - intenseBoost * 0.72);
         if (edgeMargin > 2) {
-          if (p.x < pad + edgeMargin) {
-            const factor = (pad + edgeMargin - p.x) / edgeMargin;
+          if (cxOrb - effectiveHalf < pad + edgeMargin) {
+            const factor = (pad + edgeMargin - (cxOrb - effectiveHalf)) / edgeMargin;
             p.vx += factor * edgeSteerStrength;
-          } else if (p.x + p.size > width - pad - edgeMargin) {
-            const factor = (p.x + p.size - (width - pad - edgeMargin)) / edgeMargin;
+          } else if (cxOrb + effectiveHalf > width - pad - edgeMargin) {
+            const factor = (cxOrb + effectiveHalf - (width - pad - edgeMargin)) / edgeMargin;
             p.vx -= factor * edgeSteerStrength;
           }
-          if (p.y < pad + edgeMargin) {
-            const factor = (pad + edgeMargin - p.y) / edgeMargin;
+          if (cyOrb - effectiveHalf < pad + edgeMargin) {
+            const factor = (pad + edgeMargin - (cyOrb - effectiveHalf)) / edgeMargin;
             p.vy += factor * edgeSteerStrength;
-          } else if (p.y + p.size > height - pad - edgeMargin) {
-            const factor = (p.y + p.size - (height - pad - edgeMargin)) / edgeMargin;
+          } else if (cyOrb + effectiveHalf > height - pad - edgeMargin) {
+            const factor = (cyOrb + effectiveHalf - (height - pad - edgeMargin)) / edgeMargin;
             p.vy -= factor * edgeSteerStrength;
           }
         }
@@ -436,8 +527,11 @@ export function FloatingTrackOrbs({
         const edgeCooldownOk = p.wobbleAmp < maxEdgeWobble * 0.55;
         const edgeFlashTarget = (0.2 + intenseBoost * 0.75) * fxFactor;
 
-        if (p.x < pad) {
-          p.x = pad;
+        const curCx = p.x + halfBase;
+        const curCy = p.y + halfBase;
+
+        if (curCx - effectiveHalf < pad) {
+          p.x = pad + effectiveHalf - halfBase;
           if (p.vx < -0.01) {
             p.vx = Math.abs(p.vx) * wallDamp;
             if (edgeCooldownOk) {
@@ -447,7 +541,7 @@ export function FloatingTrackOrbs({
               p.flash = Math.max(p.flash, edgeFlashTarget);
               spawnCollisionFx(
                 pad,
-                p.y + p.size / 2,
+                p.y + halfBase,
                 1,
                 0,
                 p.glowRgb,
@@ -458,8 +552,8 @@ export function FloatingTrackOrbs({
               );
             }
           }
-        } else if (p.x + p.size > width - pad) {
-          p.x = width - pad - p.size;
+        } else if (curCx + effectiveHalf > width - pad) {
+          p.x = width - pad - effectiveHalf - halfBase;
           if (p.vx > 0.01) {
             p.vx = -Math.abs(p.vx) * wallDamp;
             if (edgeCooldownOk) {
@@ -469,7 +563,7 @@ export function FloatingTrackOrbs({
               p.flash = Math.max(p.flash, edgeFlashTarget);
               spawnCollisionFx(
                 width - pad,
-                p.y + p.size / 2,
+                p.y + halfBase,
                 -1,
                 0,
                 p.glowRgb,
@@ -482,8 +576,8 @@ export function FloatingTrackOrbs({
           }
         }
 
-        if (p.y < pad) {
-          p.y = pad;
+        if (curCy - effectiveHalf < pad) {
+          p.y = pad + effectiveHalf - halfBase;
           if (p.vy < -0.01) {
             p.vy = Math.abs(p.vy) * wallDamp;
             if (edgeCooldownOk) {
@@ -492,7 +586,7 @@ export function FloatingTrackOrbs({
               p.impactAngleRad = Math.PI / 2;
               p.flash = Math.max(p.flash, edgeFlashTarget);
               spawnCollisionFx(
-                p.x + p.size / 2,
+                p.x + halfBase,
                 pad,
                 0,
                 1,
@@ -504,8 +598,8 @@ export function FloatingTrackOrbs({
               );
             }
           }
-        } else if (p.y + p.size > height - pad) {
-          p.y = height - pad - p.size;
+        } else if (curCy + effectiveHalf > height - pad) {
+          p.y = height - pad - effectiveHalf - halfBase;
           if (p.vy > 0.01) {
             p.vy = -Math.abs(p.vy) * wallDamp;
             if (edgeCooldownOk) {
@@ -514,7 +608,7 @@ export function FloatingTrackOrbs({
               p.impactAngleRad = Math.PI / 2;
               p.flash = Math.max(p.flash, edgeFlashTarget);
               spawnCollisionFx(
-                p.x + p.size / 2,
+                p.x + halfBase,
                 height - pad,
                 0,
                 -1,
@@ -546,12 +640,15 @@ export function FloatingTrackOrbs({
         for (let j = i + 1; j < physics.length; j++) {
           const a = physics[i];
           const b = physics[j];
-          const rA = a.size / 2;
-          const rB = b.size / 2;
-          const ax = a.x + rA;
-          const ay = a.y + rA;
-          const bx = b.x + rB;
-          const by = b.y + rB;
+          if (a.breathScale > 2.2 || b.breathScale > 2.2) continue;
+          const halfA = a.size / 2;
+          const halfB = b.size / 2;
+          const rA = halfA * a.breathScale;
+          const rB = halfB * b.breathScale;
+          const ax = a.x + halfA;
+          const ay = a.y + halfA;
+          const bx = b.x + halfB;
+          const by = b.y + halfB;
           const dx = bx - ax;
           const dy = by - ay;
           const dist = Math.hypot(dx, dy) || 0.01;
@@ -670,7 +767,9 @@ export function FloatingTrackOrbs({
 
         const deform = p.wobbleAmp * Math.sin(p.wobblePhase);
         glowRadius += p.flash * (11 + intenseBoost * 10);
-        glowAlpha = Math.min(1, glowAlpha + p.flash * (0.18 + intenseBoost * 0.18));
+        glowAlpha = Math.min(1, glowAlpha + p.flash * (0.18 + intenseBoost * 0.18)) * p.breathOpacityMult;
+        baseScale *= p.breathScale;
+        opacity *= p.breathOpacityMult;
 
         return { baseScale, opacity, glowRadius, glowAlpha, deform };
       });
@@ -724,6 +823,34 @@ export function FloatingTrackOrbs({
             playing,
             layeredBg,
             frameCounter,
+            opacityMult: p.breathOpacityMult,
+          });
+        }
+
+        if (livePropsRef.current.snapshotRef) {
+          livePropsRef.current.snapshotRef.current = physics.map((p, idx) => {
+            const st = orbRenderStates[idx];
+            const rotRad =
+              p.shape === 'circle' || p.shape === 'heart'
+                ? 0
+                : p.phase * rotSpeedFactor * (idx % 2 === 0 ? 1 : -1);
+            return {
+              cx: p.x + p.size / 2,
+              cy: p.y + p.size / 2,
+              vx: p.vx,
+              vy: p.vy,
+              radius: (p.size / 2) * st.baseScale,
+              rotRad,
+              phase: p.phase,
+              deform: st.deform,
+              impactAngleRad: p.impactAngleRad,
+              opacity: st.opacity,
+              isActive: p.isActive,
+              shape: p.shape,
+              fxMode: p.fxMode,
+              fxState: p.fxState,
+              coverSrc: orbSpecs[idx]?.track.cover || DEFAULT_COVER_IMAGE,
+            };
           });
         }
 
@@ -832,6 +959,8 @@ export function FloatingTrackOrbs({
             ? `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) rotate(${deg.toFixed(1)}deg) scale(${sx.toFixed(3)}, ${sy.toFixed(3)}) rotate(${(-deg).toFixed(1)}deg)`
             : `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) scale(${baseScale.toFixed(3)})`;
         el.style.opacity = opacity.toFixed(3);
+        el.style.pointerEvents = p.breathScale > 2.2 ? 'none' : 'auto';
+        el.style.zIndex = p.breathScale > 2.2 ? '1' : p.isActive ? '3' : '2';
 
         if (coverEl) {
           coverEl.style.transform = rotRad !== 0 ? `rotate(${rotDeg.toFixed(2)}deg)` : '';
@@ -872,6 +1001,9 @@ export function FloatingTrackOrbs({
     return () => {
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', resizeFxCanvas);
+      if (livePropsRef.current.snapshotRef) {
+        livePropsRef.current.snapshotRef.current = [];
+      }
     };
   }, [orbSpecs]);
 

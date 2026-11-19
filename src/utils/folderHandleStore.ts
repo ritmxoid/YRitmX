@@ -1,15 +1,20 @@
 import { getTranslations } from '../i18n/translations';
 
 const DB_NAME = 'yritmx_handles_db';
+const DB_VERSION = 2;
 const STORE_NAME = 'directory_handles';
+const FILES_STORE_NAME = 'folder_files';
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME);
+      }
+      if (!db.objectStoreNames.contains(FILES_STORE_NAME)) {
+        db.createObjectStore(FILES_STORE_NAME);
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -51,6 +56,52 @@ export async function deleteDirectoryHandle(id: string): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       tx.objectStore(STORE_NAME).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // ignore
+  }
+}
+
+export async function saveFolderFiles(id: string, files: File[]): Promise<void> {
+  if (!files.length) return;
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(FILES_STORE_NAME, 'readwrite');
+      tx.objectStore(FILES_STORE_NAME).put(files, id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // Gracefully ignore storage quota / private mode limits
+  }
+}
+
+export async function getFolderFiles(id: string): Promise<File[] | null> {
+  try {
+    const db = await openDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(FILES_STORE_NAME, 'readonly');
+      const req = tx.objectStore(FILES_STORE_NAME).get(id);
+      req.onsuccess = () => {
+        const res = req.result;
+        resolve(Array.isArray(res) && res.length > 0 ? (res as File[]) : null);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteFolderFiles(id: string): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(FILES_STORE_NAME, 'readwrite');
+      tx.objectStore(FILES_STORE_NAME).delete(id);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -104,7 +155,9 @@ export async function readAudioFilesFromDirectoryHandle(
         const file = await fileHandle.getFile();
         if (
           file.type.startsWith('audio/') ||
-          /\.(mp3|flac|wav|ogg|m4a|aac)$/i.test(file.name)
+          file.type.startsWith('video/') ||
+          file.type.startsWith('image/') ||
+          /\.(mp3|flac|wav|ogg|m4a|aac|mp4|webm|mov|m4v|jpg|jpeg|png|webp|gif)$/i.test(file.name)
         ) {
           audioFiles.push({ relPath, file });
         }

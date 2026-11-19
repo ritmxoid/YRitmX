@@ -17,6 +17,7 @@ import {
   SavedUrlEntry,
   SourceTab,
 } from '../types/audio';
+import { extractAudiusHandle } from '../utils/audiusApi';
 
 interface SourcesModalProps {
   isOpen: boolean;
@@ -83,7 +84,7 @@ export function SourcesModal({
 
   const handleAudiusSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleaned = audiusInput.replace(/^@/, '').trim();
+    const cleaned = extractAudiusHandle(audiusInput) || audiusInput.replace(/^@/, '').trim();
     if (cleaned) {
       onLoadAudiusProfile(cleaned);
     }
@@ -311,7 +312,7 @@ export function SourcesModal({
                     ref={setFolderAttributes}
                     type="file"
                     multiple
-                    accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac"
+                    accept="audio/*,video/mp4,video/webm,video/quicktime,image/*,.mp3,.wav,.flac,.ogg,.m4a,.aac,.mp4,.webm,.mov,.m4v,.jpg,.jpeg,.png,.webp"
                     onChange={handleFileInputChange}
                     disabled={isParsingFiles}
                     className="hidden"
@@ -325,7 +326,7 @@ export function SourcesModal({
                 <input
                   type="file"
                   multiple
-                  accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac"
+                  accept="audio/*,video/mp4,video/webm,video/quicktime,image/*,.mp3,.wav,.flac,.ogg,.m4a,.aac,.mp4,.webm,.mov,.m4v,.jpg,.jpeg,.png,.webp"
                   onChange={handleFileInputChange}
                   disabled={isParsingFiles}
                   className="hidden"
@@ -370,10 +371,15 @@ export function SourcesModal({
                         >
                           <button
                             type="button"
+                            disabled={isParsingFiles}
                             onClick={() => onSelectSavedFolder(folder)}
-                            className="flex items-center gap-2.5 flex-1 text-left cursor-pointer min-w-0 py-0.5"
+                            className="flex items-center gap-2.5 flex-1 text-left cursor-pointer disabled:opacity-60 disabled:cursor-wait min-w-0 py-1 px-0.5 rounded-lg"
                           >
-                            <FolderOpen className="w-4 h-4 text-purple-400 shrink-0" />
+                            {isParsingFiles && isActive ? (
+                              <Loader2 className="w-4 h-4 text-purple-300 animate-spin shrink-0" />
+                            ) : (
+                              <FolderOpen className="w-4 h-4 text-purple-400 shrink-0" />
+                            )}
                             <div className="min-w-0 flex-1">
                               <div className="text-xs font-semibold text-gray-100 truncate">
                                 {folder.name}
@@ -385,6 +391,7 @@ export function SourcesModal({
                           </button>
                           <button
                             type="button"
+                            disabled={isParsingFiles}
                             onClick={() =>
                               setPendingDelete({
                                 type: 'folder',
@@ -394,7 +401,7 @@ export function SourcesModal({
                             }
                             aria-label={`${t.deleteFolderAria} ${folder.name}`}
                             title={t.removeFromListTitle}
-                            className="text-gray-400 hover:text-red-400 p-1.5 rounded-lg hover:bg-white/10 transition cursor-pointer shrink-0"
+                            className="text-gray-400 hover:text-red-400 p-1.5 rounded-lg hover:bg-white/10 transition cursor-pointer shrink-0 disabled:opacity-50"
                           >
                             <X className="w-3.5 h-3.5" />
                           </button>

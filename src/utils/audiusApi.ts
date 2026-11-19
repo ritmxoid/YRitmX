@@ -12,6 +12,9 @@ interface AudiusTrack {
   id: string;
   title: string;
   duration?: number;
+  is_delete?: boolean;
+  is_available?: boolean;
+  is_streamable?: boolean;
   artwork?: {
     '150x150'?: string;
     '480x480'?: string;
@@ -23,7 +26,83 @@ interface AudiusTrack {
   };
 }
 
+interface AudiusRepostEntry {
+  item_type?: string;
+  item?: AudiusTrack & {
+    tracks?: AudiusTrack[];
+  };
+}
+
 export const DEFAULT_AUDIUS_HANDLE = 'RitmXoid';
+export const INTERNATIONAL_AUDIUS_HANDLE = 'estelladawnmusic';
+
+const RITMXOID_DEFAULT_LANG_CODES = new Set([
+  'ru', // Russian
+  'uk', // Ukrainian
+  'ua', // legacy Ukrainian alias
+  'kk', // Kazakh
+  'kz', // Kazakh alias
+  'uz', // Uzbek
+  'tg', // Tajik
+  'ky', // Kyrgyz
+  'kg', // Kyrgyz alias
+  'tk', // Turkmen
+  'tm', // Turkmen alias
+  'bg', // Bulgarian
+  'hu', // Hungarian
+  'mo', // Moldovan (legacy ISO 639-1)
+  'lt', // Lithuanian
+  'ka', // Georgian
+  'ge', // Georgian alias
+  'hy', // Armenian
+  'am', // Armenian alias
+  'tr', // Turkish
+  'az', // Azerbaijani
+  'cs', // Czech
+  'cz', // Czech alias
+  'sk', // Slovak
+  'pl', // Polish
+  'ro', // Romanian (including ro-MD Moldovan)
+]);
+
+export function getDefaultAudiusHandleForBrowser(): string {
+  if (typeof navigator === 'undefined') return DEFAULT_AUDIUS_HANDLE;
+  const primaryRaw =
+    (navigator.languages && navigator.languages.length > 0
+      ? navigator.languages[0]
+      : navigator.language) || '';
+  const base = primaryRaw.toLowerCase().trim().split(/[-_]/)[0] || '';
+  return RITMXOID_DEFAULT_LANG_CODES.has(base)
+    ? DEFAULT_AUDIUS_HANDLE
+    : INTERNATIONAL_AUDIUS_HANDLE;
+}
+
+export function extractAudiusHandle(rawInput: string): string {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return '';
+
+  const looksLikeUrl =
+    /^https?:\/\//i.test(trimmed) || /^(?:www\.)?audius\.co\//i.test(trimmed);
+  if (looksLikeUrl) {
+    try {
+      const parsed = new URL(
+        /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+      );
+      if (
+        parsed.hostname === 'audius.co' ||
+        parsed.hostname.endsWith('.audius.co')
+      ) {
+        const seg = parsed.pathname.split('/').filter(Boolean)[0] ?? '';
+        return decodeURIComponent(seg).replace(/^@/, '').trim();
+      }
+      return '';
+    } catch {
+      return '';
+    }
+  }
+
+  return trimmed.replace(/^@/, '').trim();
+}
 
 async function resolveAudiusUser(host: string, cleanHandle: string): Promise<AudiusUser | null> {
   const t = getTranslations();
@@ -51,9 +130,46 @@ async function resolveAudiusUser(host: string, cleanHandle: string): Promise<Aud
   const users = searchData.data ?? [];
   if (users.length === 0) return null;
 
+  const lower = cleanHandle.toLowerCase();
   return (
-    users.find((u) => u.handle.toLowerCase() === cleanHandle.toLowerCase()) ?? users[0]
+    users.find((u) => u.handle.toLowerCase() === lower) ??
+    users.find((u) => u.name.toLowerCase() === lower) ??
+    users.find((u) => !/^https?:\/\//i.test(u.name.trim())) ??
+    users[0]
   );
+}
+
+function collectTracksFromReposts(entries: AudiusRepostEntry[]): AudiusTrack[] {
+  const seenIds = new Set<string>();
+  const collected: AudiusTrack[] = [];
+
+  const pushTrack = (tr: AudiusTrack | undefined) => {
+    if (
+      !tr ||
+      !tr.id ||
+      !tr.title ||
+      tr.is_delete === true ||
+      tr.is_available === false ||
+      tr.is_streamable === false ||
+      seenIds.has(tr.id)
+    ) {
+      return;
+    }
+    seenIds.add(tr.id);
+    collected.push(tr);
+  };
+
+  for (const entry of entries) {
+    if (!entry?.item) continue;
+    if (entry.item_type === 'track') {
+      pushTrack(entry.item);
+    } else if (entry.item_type === 'playlist' && Array.isArray(entry.item.tracks)) {
+      for (const plTrack of entry.item.tracks) {
+        pushTrack(plTrack);
+      }
+    }
+  }
+  return collected;
 }
 
 export async function fetchAudiusProfileTracks(handle: string): Promise<{
@@ -61,9 +177,11 @@ export async function fetchAudiusProfileTracks(handle: string): Promise<{
   resolvedHandle: string;
 }> {
   const t = getTranslations();
-  const cleanHandle = handle.replace(/^@/, '').trim();
+  const cleanHandle = extractAudiusHandle(handle);
   if (!cleanHandle) {
-    throw new Error(t.errEnterAudiusHandle);
+    throw new Error(
+      /^https?:\/\//i.test(handle.trim()) ? t.errAudiusUrlExample : t.errEnterAudiusHandle
+    );
   }
 
   const resolveRes = await fetch('https://api.audius.co');
@@ -93,7 +211,25 @@ export async function fetchAudiusProfileTracks(handle: string): Promise<{
       if (!tracksRes.ok) continue;
 
       const tracksData = (await tracksRes.json()) as { data?: AudiusTrack[] };
-      const rawTracks = tracksData.data ?? [];
+      let rawTracks = (tracksData.data ?? []).filter(
+        (tr) => tr.id && tr.title && tr.is_delete !== true && tr.is_available !== false
+      );
+
+      // Curator/listener profiles (such as @nowellasarah) publish music via Reposts rather than uploads
+      if (rawTracks.length === 0) {
+        try {
+          const repostsRes = await fetch(
+            `${host}/v1/users/${selectedUser.id}/reposts?limit=100`
+          );
+          if (repostsRes.ok) {
+            const repostsData = (await repostsRes.json()) as { data?: AudiusRepostEntry[] };
+            rawTracks = collectTracksFromReposts(repostsData.data ?? []);
+          }
+        } catch {
+          // Ignore repost fetch error and throw no-tracks below if empty
+        }
+      }
+
       if (rawTracks.length === 0) {
         isTerminalUserError = true;
         throw new Error(t.errAudiusNoTracks(selectedUser.handle));
@@ -102,7 +238,7 @@ export async function fetchAudiusProfileTracks(handle: string): Promise<{
       const tracks: Track[] = rawTracks.map((tr) => ({
         id: `audius-${tr.id}`,
         title: tr.title,
-        artist: tr.user?.name || selectedUser.name || selectedUser.handle,
+        artist: tr.user?.name || tr.user?.handle || selectedUser.name || selectedUser.handle,
         cover:
           tr.artwork?.['480x480'] ||
           tr.artwork?.['150x150'] ||

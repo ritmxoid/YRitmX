@@ -4,6 +4,84 @@ import { Track } from '../types/audio';
 import { fetchAudiusProfileTracks } from './audiusApi';
 
 const AUDIO_EXT_RE = /\.(mp3|wav|flac|ogg|m4a|aac|opus)(\?.*)?$/i;
+const VIDEO_EXT_RE = /\.(mp4|webm|mov|m4v)(\?.*)?$/i;
+const NON_STREAM_DOC_EXT_RE =
+  /\.(html?|php|asp|aspx|jsp|json|xml|rss|txt|m3u8?|pls)(\?.*)?$/i;
+const RADIO_STREAM_PATH_RE =
+  /(?:[-_](?:32|48|56|64|80|96|112|128|160|192|224|256|320)[-_](?:mp3|aac|aacp|ogg|opus|flac|m4a)|\/(?:stream|listen|radio|live|mp3|aac|aacp|ogg|opus)(?:\/\d*)?|\/;[^/?#]*)$/i;
+const RADIO_HOST_RE = /(^|\.)(somafm\.com|musicradio\.com|streamguys\d*\.com|icecast|shoutcast|radiostream)/i;
+
+function isLikelyDirectAudioStreamUrl(parsedUrl: URL): boolean {
+  if (NON_STREAM_DOC_EXT_RE.test(parsedUrl.pathname)) return false;
+  if (RADIO_STREAM_PATH_RE.test(parsedUrl.pathname)) return true;
+  if (RADIO_HOST_RE.test(parsedUrl.hostname)) return true;
+  if (parsedUrl.port && parsedUrl.port !== '80' && parsedUrl.port !== '443') return true;
+  return false;
+}
+
+function buildRadioStreamResult(normalizedUrl: string, parsedUrl: URL): {
+  tracks: Track[];
+  label: string;
+  normalizedUrl: string;
+} {
+  const track: Track = {
+    id: `url-stream-${normalizedUrl}`,
+    title: 'RadioFM',
+    artist: parsedUrl.hostname,
+    cover: DEFAULT_COVER_IMAGE,
+    src: normalizedUrl,
+    sourceName: 'RadioFM',
+    mediaType: 'audio',
+    isRadio: true,
+  };
+  return {
+    tracks: [track],
+    label: `RadioFM: ${parsedUrl.hostname}`,
+    normalizedUrl,
+  };
+}
+
+function probeAudioElementPlayable(url: string): Promise<boolean> {
+  if (typeof Audio === 'undefined') return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const probe = new Audio();
+    probe.crossOrigin = 'anonymous';
+    probe.preload = 'metadata';
+    probe.muted = true;
+    let settled = false;
+
+    const cleanup = (result: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      probe.removeEventListener('loadedmetadata', onOk);
+      probe.removeEventListener('canplay', onOk);
+      probe.removeEventListener('error', onErr);
+      try {
+        probe.pause();
+        probe.removeAttribute('src');
+        probe.load();
+      } catch {
+        // ignore cleanup errors
+      }
+      resolve(result);
+    };
+
+    const onOk = () => cleanup(true);
+    const onErr = () => cleanup(false);
+
+    const timer = window.setTimeout(() => cleanup(false), 4500);
+    probe.addEventListener('loadedmetadata', onOk);
+    probe.addEventListener('canplay', onOk);
+    probe.addEventListener('error', onErr);
+    probe.src = url;
+    try {
+      probe.load();
+    } catch {
+      cleanup(false);
+    }
+  });
+}
 
 function titleFromUrl(url: string, fallbackIndex: number): string {
   const t = getTranslations();
@@ -58,6 +136,45 @@ function parseM3uPlaylist(text: string, baseUrl: string): Track[] {
     pendingArtist = '';
   }
 
+  return tracks;
+}
+
+function parsePlsPlaylist(text: string, baseUrl: string): Track[] {
+  const entries = new Map<string, { file?: string; title?: string }>();
+  const lines = text.split(/\r?\n/);
+  for (const raw of lines) {
+    const line = raw.trim();
+    const match = line.match(/^(File|Title)(\d+)\s*=\s*(.+)$/i);
+    if (!match) continue;
+    const key = match[1].toLowerCase();
+    const idx = match[2];
+    const val = match[3].trim();
+    const item = entries.get(idx) ?? {};
+    if (key === 'file') item.file = val;
+    else item.title = val;
+    entries.set(idx, item);
+  }
+
+  const host = new URL(baseUrl).hostname;
+  const tracks: Track[] = [];
+  for (const [, entry] of entries) {
+    if (!entry.file) continue;
+    try {
+      const resolved = new URL(entry.file, baseUrl).toString();
+      tracks.push({
+        id: `url-pls-${tracks.length}-${resolved}`,
+        title: entry.title || 'RadioFM',
+        artist: host,
+        cover: DEFAULT_COVER_IMAGE,
+        src: resolved,
+        sourceName: 'RadioFM',
+        mediaType: 'audio',
+        isRadio: true,
+      });
+    } catch {
+      // skip invalid url entry
+    }
+  }
   return tracks;
 }
 
@@ -330,47 +447,74 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
     }
   }
 
-  // 4. Direct audio file URL
-  if (AUDIO_EXT_RE.test(parsedUrl.pathname)) {
+  // 4. Direct audio, video, or Icecast/Shoutcast radio stream URL
+  if (AUDIO_EXT_RE.test(parsedUrl.pathname) || VIDEO_EXT_RE.test(parsedUrl.pathname)) {
+    const isVideo = VIDEO_EXT_RE.test(parsedUrl.pathname);
+    const isRadioFile = !isVideo && RADIO_HOST_RE.test(parsedUrl.hostname);
     const track: Track = {
       id: `url-file-${normalizedUrl}`,
-      title: titleFromUrl(normalizedUrl, 0),
+      title: isRadioFile ? 'RadioFM' : titleFromUrl(normalizedUrl, 0),
       artist: parsedUrl.hostname,
       cover: DEFAULT_COVER_IMAGE,
       src: normalizedUrl,
-      sourceName: `URL: ${parsedUrl.hostname}`,
+      sourceName: isRadioFile ? 'RadioFM' : `URL: ${parsedUrl.hostname}`,
+      mediaType: isVideo ? 'video' : 'audio',
+      isRadio: isRadioFile,
     };
     return {
       tracks: [track],
-      label: track.title,
+      label: isRadioFile ? `RadioFM: ${parsedUrl.hostname}` : track.title,
       normalizedUrl,
     };
   }
 
-  // 5. Try fetching JSON / M3U / RSS / HTML index from URL
+  if (isLikelyDirectAudioStreamUrl(parsedUrl)) {
+    return buildRadioStreamResult(normalizedUrl, parsedUrl);
+  }
+
+  // 5. Try fetching JSON / M3U / PLS / RSS / HTML index from URL
   let res: Response;
   try {
     res = await fetch(normalizedUrl);
   } catch {
+    if (!NON_STREAM_DOC_EXT_RE.test(parsedUrl.pathname)) {
+      const playable = await probeAudioElementPlayable(normalizedUrl);
+      if (playable) {
+        return buildRadioStreamResult(normalizedUrl, parsedUrl);
+      }
+    }
     throw new Error(t.errCorsBlocked);
   }
 
   if (!res.ok) {
+    if (
+      (res.status === 403 || res.status === 405) &&
+      !NON_STREAM_DOC_EXT_RE.test(parsedUrl.pathname)
+    ) {
+      const playable = await probeAudioElementPlayable(normalizedUrl);
+      if (playable) {
+        return buildRadioStreamResult(normalizedUrl, parsedUrl);
+      }
+    }
     throw new Error(t.errSourceStatus(res.status));
   }
 
   const contentType = (res.headers.get('content-type') || '').toLowerCase();
 
-  if (contentType.startsWith('audio/')) {
+  if (contentType.startsWith('audio/') || contentType.startsWith('video/')) {
+    void res.body?.cancel?.().catch(() => {});
+    const isAudioRadio = contentType.startsWith('audio/');
     const track: Track = {
       id: `url-stream-${normalizedUrl}`,
-      title: titleFromUrl(normalizedUrl, 0),
+      title: isAudioRadio ? 'RadioFM' : titleFromUrl(normalizedUrl, 0),
       artist: parsedUrl.hostname,
       cover: DEFAULT_COVER_IMAGE,
       src: normalizedUrl,
-      sourceName: `${t.urlStreamPrefix}: ${parsedUrl.hostname}`,
+      sourceName: isAudioRadio ? 'RadioFM' : `${t.urlStreamPrefix}: ${parsedUrl.hostname}`,
+      mediaType: isAudioRadio ? 'audio' : 'video',
+      isRadio: isAudioRadio,
     };
-    return { tracks: [track], label: track.title, normalizedUrl };
+    return { tracks: [track], label: isAudioRadio ? 'RadioFM' : track.title, normalizedUrl };
   }
 
   const bodyText = await res.text();
@@ -382,6 +526,18 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
       throw new Error(t.errJsonNoTracks);
     }
     return { tracks, label: `JSON: ${parsedUrl.hostname}`, normalizedUrl };
+  }
+
+  if (
+    parsedUrl.pathname.toLowerCase().endsWith('.pls') ||
+    contentType.includes('x-scpls') ||
+    /^\[playlist\]/im.test(bodyText.trim())
+  ) {
+    const tracks = parsePlsPlaylist(bodyText, normalizedUrl);
+    if (tracks.length === 0) {
+      throw new Error(t.errM3uNoTracks);
+    }
+    return { tracks, label: `RadioFM: ${parsedUrl.hostname}`, normalizedUrl };
   }
 
   if (

@@ -9,7 +9,10 @@ export type OrbShape =
   | 'poly5'
   | 'poly6'
   | 'poly8'
-  | 'heart';
+  | 'heart'
+  | 'square'
+  | 'rect_h'
+  | 'rect_v';
 
 export type OrbFxMode =
   | 'ripples'
@@ -27,7 +30,9 @@ export type OrbFxMode =
   | 'radar_track'
   | 'radar_star4'
   | 'radar_sparkler'
-  | 'combo_aurora_spark';
+  | 'combo_aurora_spark'
+  | 'canvas_bloom'
+  | 'soft_fade';
 
 export const RADAR_FX_MODES: OrbFxMode[] = [
   'radar_comet',
@@ -53,6 +58,7 @@ export const ORB_FX_MODES: OrbFxMode[] = [
   'radar_star4',
   'radar_sparkler',
   'combo_aurora_spark',
+  'canvas_bloom',
 ];
 
 export const ORB_SHAPES: OrbShape[] = [
@@ -71,6 +77,8 @@ export const ORB_SHAPES: OrbShape[] = [
 
 export interface ContourWaveClone {
   radii: Float32Array;
+  unitX?: Float32Array;
+  unitY?: Float32Array;
   expandPx: number;
   expandSpeed: number;
   life: number;
@@ -231,6 +239,11 @@ function buildRawControlVertices(shape: OrbShape): Array<{ x: number; y: number 
     return pts;
   }
 
+  if (shape === 'square' || shape === 'rect_h' || shape === 'rect_v') {
+    pts.push({ x: -1, y: -1 }, { x: 1, y: -1 }, { x: 1, y: 1 }, { x: -1, y: 1 });
+    return pts;
+  }
+
   if (shape === 'diamond') {
     for (let i = 0; i < 4; i++) {
       const ang = -Math.PI / 2 + (i / 4) * Math.PI * 2;
@@ -261,7 +274,7 @@ function buildRawControlVertices(shape: OrbShape): Array<{ x: number; y: number 
   return pts;
 }
 
-function getNormalizedShapeGeometry(shape: OrbShape): {
+export function getNormalizedShapeGeometry(shape: OrbShape): {
   x: Float32Array;
   y: Float32Array;
   r: Float32Array;
@@ -335,6 +348,8 @@ export function getShapeClipPath(shape: OrbShape): string | undefined {
 
 const scratchX = new Float32Array(CONTOUR_SEGMENTS);
 const scratchY = new Float32Array(CONTOUR_SEGMENTS);
+const scratchUx = new Float32Array(CONTOUR_SEGMENTS);
+const scratchUy = new Float32Array(CONTOUR_SEGMENTS);
 const scratchRadii = new Float32Array(CONTOUR_SEGMENTS);
 
 function traceSmoothPolygon(
@@ -375,6 +390,7 @@ export interface RenderOrbFxParams {
   vx: number;
   vy: number;
   radius: number;
+  radiusY?: number;
   rotRad: number;
   phase: number;
   deform: number;
@@ -390,6 +406,8 @@ export interface RenderOrbFxParams {
   playing: boolean;
   layeredBg: boolean;
   frameCounter: number;
+  opacityMult?: number;
+  stepScale?: number;
 }
 
 export function renderOrbFxFrame(params: RenderOrbFxParams): void {
@@ -405,6 +423,7 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
     vx,
     vy,
     radius: r,
+    radiusY,
     rotRad,
     phase,
     deform,
@@ -419,7 +438,17 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
     playing,
     layeredBg,
     frameCounter,
+    opacityMult = 1,
+    stepScale = 1,
   } = params;
+
+  if (fxMode === 'soft_fade') {
+    return;
+  }
+
+  const rxFrame = r;
+  const ryFrame = radiusY ?? r;
+  const rMax = Math.max(rxFrame, ryFrame);
 
   const geom = getNormalizedShapeGeometry(shape);
   const orbHue = (songHue + orbIndex * 42) % 360;
@@ -433,7 +462,7 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
     ? 1.0 + energyNorm * 3.2 + intenseBoost * 4.4 + beatKick * 4.8
     : 0.4;
 
-  // Populate base contour vertices in local rotated frame
+  // Populate base contour vertices in local rotated frame (supporting anisotropic rxFrame/ryFrame)
   for (let k = 0; k < CONTOUR_SEGMENTS; k++) {
     const ang = (k / CONTOUR_SEGMENTS) * Math.PI * 2;
     const sym = k <= CONTOUR_SEGMENTS / 2 ? k : CONTOUR_SEGMENTS - k;
@@ -447,13 +476,16 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
       -0.5,
       (harmonicWave * 0.45 + binVal * (0.55 + intenseBoost * 0.68)) * contourAmp * orbWeight
     );
-    const scaleR = r + 1.0 + dr;
-    scratchRadii[k] = geom.r[k] * r + 1.0 + dr;
-    const ux = geom.x[k] / geom.r[k];
-    const uy = geom.y[k] / geom.r[k];
-    scratchX[k] = geom.x[k] * r + ux * (1.0 + dr);
-    scratchY[k] = geom.y[k] * r + uy * (1.0 + dr);
-    void scaleR;
+    const sx = geom.x[k] * rxFrame;
+    const sy = geom.y[k] * ryFrame;
+    const sDist = Math.hypot(sx, sy) || 0.01;
+    const ux = sx / sDist;
+    const uy = sy / sDist;
+    scratchUx[k] = ux;
+    scratchUy[k] = uy;
+    scratchRadii[k] = sDist + 1.0 + dr;
+    scratchX[k] = sx + ux * (1.0 + dr);
+    scratchY[k] = sy + uy * (1.0 + dr);
   }
 
   const sampleContourAt = (uRaw: number): { x: number; y: number; nx: number; ny: number } => {
@@ -478,7 +510,9 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
     const stepU =
       (playing
         ? 0.0036 + melodyIntensity * 0.0046 + beatKick * 0.0032
-        : 0.0018) * fxState.radarSpeedMult;
+        : 0.0018) *
+      fxState.radarSpeedMult *
+      stepScale;
     fxState.radarPos = (fxState.radarPos + fxState.radarDir * stepU + 10) % 1;
   }
 
@@ -511,7 +545,7 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
       const ca2 = Math.cos(impactAngleRad);
       const sa2 = Math.sin(impactAngleRad);
       sx = dx * ca2 - dy * sa2;
-      sy = dx * sa2 + dy * sa2;
+      sy = dx * sa2 + dy * ca2;
     }
 
     const wx = cx + sx;
@@ -577,16 +611,17 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
   ) {
     for (let i = fxState.particles.length - 1; i >= 0; i--) {
       const pt = fxState.particles[i];
-      pt.life += 1;
+      pt.life += stepScale;
       if (pt.life >= pt.maxLife) {
         fxState.particles.splice(i, 1);
         continue;
       }
-      pt.x += pt.vx;
-      pt.y += pt.vy;
-      pt.vx *= 0.94;
-      pt.vy *= 0.94;
-      const pProg = pt.life / pt.maxLife;
+      pt.x += pt.vx * stepScale;
+      pt.y += pt.vy * stepScale;
+      const damp = Math.pow(0.94, stepScale);
+      pt.vx *= damp;
+      pt.vy *= damp;
+      const pProg = Math.min(1, pt.life / pt.maxLife);
       const pAlpha = (1 - pProg) * (0.45 + melodyIntensity * 0.55);
       ctx.fillStyle = hslToCss(pt.hue, 96, 66 + melodyIntensity * 22, pAlpha);
       ctx.beginPath();
@@ -607,10 +642,11 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
     ctx.rotate(rotRad);
   }
 
-  const contourAlpha = playing ? Math.min(0.98, 0.32 + melodyIntensity * 0.66) : 0.22;
+  const alphaMult = Math.max(0.05, Math.min(1, opacityMult));
+  const contourAlpha = (playing ? Math.min(0.98, 0.32 + melodyIntensity * 0.66) : 0.22) * alphaMult;
   const primaryGrad = createContourGradient(
     ctx,
-    r + 14,
+    rMax + 14,
     orbHue,
     gradAngle,
     sat,
@@ -648,6 +684,8 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
       }
       fxState.waveClones.push({
         radii: new Float32Array(scratchRadii),
+        unitX: new Float32Array(scratchUx),
+        unitY: new Float32Array(scratchUy),
         expandPx: 1.5,
         expandSpeed: (layeredBg ? 0.6 : 0.7) + melodyIntensity * 0.85 + (isActive ? 0.15 : 0),
         life: 0,
@@ -665,22 +703,22 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
     const tmpY = new Float32Array(CONTOUR_SEGMENTS);
     for (let c = fxState.waveClones.length - 1; c >= 0; c--) {
       const clone = fxState.waveClones[c];
-      clone.life += 1;
+      clone.life += stepScale;
       const progress = clone.life / clone.maxLife;
       if (progress >= 1) {
         fxState.waveClones.splice(c, 1);
         continue;
       }
-      clone.expandPx += clone.expandSpeed * (1 - progress * 0.35);
-      clone.hueBase = (clone.hueBase + 0.25) % 360;
+      clone.expandPx += clone.expandSpeed * (1 - progress * 0.35) * stepScale;
+      clone.hueBase = (clone.hueBase + 0.25 * stepScale) % 360;
 
       const fade = Math.pow(1 - progress, 1.65);
       const cloneLum = Math.max(clone.intensity, melodyIntensity * 0.7);
-      const cloneAlpha = fade * (0.28 + cloneLum * 0.54);
+      const cloneAlpha = fade * (0.28 + cloneLum * 0.54) * alphaMult;
 
       for (let k = 0; k < CONTOUR_SEGMENTS; k++) {
-        const ux = geom.x[k] / geom.r[k];
-        const uy = geom.y[k] / geom.r[k];
+        const ux = clone.unitX ? clone.unitX[k] : scratchUx[k];
+        const uy = clone.unitY ? clone.unitY[k] : scratchUy[k];
         const radScale = clone.radii[k] + clone.expandPx;
         tmpX[k] = ux * radScale;
         tmpY[k] = uy * radScale;
@@ -689,7 +727,7 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
       traceSmoothPolygon(ctx, tmpX, tmpY, smoothCurve);
       ctx.strokeStyle = createContourGradient(
         ctx,
-        r + clone.expandPx + 8,
+        rMax + clone.expandPx + 8,
         clone.hueBase,
         clone.gradAngle + progress * 0.4,
         76 + cloneLum * 24,
@@ -715,8 +753,8 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
       ctx.beginPath();
       for (let s = 0; s <= span; s++) {
         const k = (startK + s) % CONTOUR_SEGMENTS;
-        const ux = geom.x[k] / geom.r[k];
-        const uy = geom.y[k] / geom.r[k];
+        const ux = scratchUx[k];
+        const uy = scratchUy[k];
         const j = s === 0 || s === span ? 0.5 : (Math.random() - 0.25) * jitterMax;
         const px = scratchX[k] + ux * j;
         const py = scratchY[k] + uy * j;
@@ -765,7 +803,7 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
       for (let g = 0; g < 3; g++) {
         const ang = ((fxState.glitchSeed + g * 2.1) % (Math.PI * 2));
         const len = 0.25 + Math.random() * 0.4;
-        const rr = r + 3 + Math.random() * 10;
+        const rr = rMax + 3 + Math.random() * 10;
         ctx.beginPath();
         ctx.arc(Math.sin(frameCounter + g) * 4, 0, rr, ang, ang + len);
         ctx.strokeStyle = hslToCss(orbHue + g * 120, 100, 75, 0.7);
@@ -782,13 +820,13 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
     const segStep = 2;
     for (let k = 0; k < CONTOUR_SEGMENTS; k += segStep) {
       const next = (k + 1) % CONTOUR_SEGMENTS;
-      const ux = geom.x[k] / geom.r[k];
-      const uy = geom.y[k] / geom.r[k];
+      const ux = scratchUx[k];
+      const uy = scratchUy[k];
       const waveOffset = scatterPx * (0.65 + 0.5 * Math.sin(k * 1.9 + phase * 4));
       const x1 = scratchX[k] + ux * waveOffset;
       const y1 = scratchY[k] + uy * waveOffset;
-      const x2 = scratchX[next] + (geom.x[next] / geom.r[next]) * waveOffset;
-      const y2 = scratchY[next] + (geom.y[next] / geom.r[next]) * waveOffset;
+      const x2 = scratchX[next] + scratchUx[next] * waveOffset;
+      const y2 = scratchY[next] + scratchUy[next] * waveOffset;
 
       const segHue = (orbHue + k * 9) % 360;
       ctx.strokeStyle = hslToCss(segHue, sat, Math.min(90, light + 8), 0.38 + melodyIntensity * 0.58);
@@ -812,8 +850,8 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
       const binIdx = 2 + ((k + orbIndex * 2) % 36);
       const binVal = playing ? freqBuf[binIdx] / 255 : 0.12;
       const rayLen = 4 + binVal * (14 + intenseBoost * 24) + beatKick * 12;
-      const ux = geom.x[k] / geom.r[k];
-      const uy = geom.y[k] / geom.r[k];
+      const ux = scratchUx[k];
+      const uy = scratchUy[k];
       const x1 = scratchX[k];
       const y1 = scratchY[k];
       const x2 = x1 + ux * rayLen;
@@ -834,7 +872,7 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
     const ringCount = layeredBg ? 2 : 3;
     for (let n = 0; n < ringCount; n++) {
       const ringHue = (orbHue + n * 85 + phase * 22) % 360;
-      const ringScale = 1 + (3 + n * 5 + melodyIntensity * 6) / Math.max(24, r);
+      const ringScale = 1 + (3 + n * 5 + melodyIntensity * 6) / Math.max(24, rMax);
       const tilt = phase * (n % 2 === 0 ? 1.1 : -1.4) + n * 1.2;
       ctx.save();
       ctx.rotate(tilt);
@@ -856,8 +894,8 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
         const ang = (k / CONTOUR_SEGMENTS) * Math.PI * 2;
         const flare =
           Math.max(0, Math.sin(ang * 5 + phase * 4.2 + l * 2)) * (5 + melodyIntensity * 15 + beatKick * 12);
-        const ux = geom.x[k] / geom.r[k];
-        const uy = geom.y[k] / geom.r[k];
+        const ux = scratchUx[k];
+        const uy = scratchUy[k];
         flameX[k] = scratchX[k] + ux * (2 + l * 4 + flare);
         flameY[k] = scratchY[k] + uy * (2 + l * 4 + flare);
       }
@@ -878,8 +916,8 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
     for (let s = 0; s < satCount; s++) {
       const orbitAngle = phase * (1.8 + s * 0.45) + (s * Math.PI * 2) / satCount;
       const orbitTilt = (s * Math.PI) / satCount;
-      const rx = r + 10 + s * 4 + melodyIntensity * 5;
-      const ry = (r + 6 + s * 2) * 0.55;
+      const rx = rMax + 10 + s * 4 + melodyIntensity * 5;
+      const ry = (rMax + 6 + s * 2) * 0.55;
 
       const lx = Math.cos(orbitAngle) * rx;
       const ly = Math.sin(orbitAngle) * ry;
@@ -897,7 +935,7 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
       const satHue = (orbHue + s * 75) % 360;
       const tailGrad = ctx.createLinearGradient(psx, psy, sx, sy);
       tailGrad.addColorStop(0, hslToCss(satHue, 100, 70, 0));
-      tailGrad.addColorStop(1, hslToCss(satHue, 100, 80, 0.85));
+      tailGrad.addColorStop(1, hslToCss(satHue, 100, 80, 0.85 * alphaMult));
       ctx.strokeStyle = tailGrad;
       ctx.lineWidth = 1.6 + melodyIntensity;
       ctx.beginPath();
@@ -905,7 +943,7 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
       ctx.lineTo(sx, sy);
       ctx.stroke();
 
-      ctx.fillStyle = hslToCss(satHue + 20, 100, 86, 0.95);
+      ctx.fillStyle = hslToCss(satHue + 20, 100, 86, 0.95 * alphaMult);
       ctx.beginPath();
       ctx.arc(sx, sy, 2.2 + melodyIntensity * 1.5, 0, Math.PI * 2);
       ctx.fill();
@@ -913,14 +951,14 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
   } else if (fxMode === 'prism_radar') {
     strokeBaseGlowShape(0.85);
     const sweepAngle = phase * 2.4 + orbIndex;
-    const sweepR = r + 16 + melodyIntensity * 14;
+    const sweepR = rMax + 16 + melodyIntensity * 14;
     const radarGrad = ctx.createLinearGradient(
       0,
       0,
       Math.cos(sweepAngle) * sweepR,
       Math.sin(sweepAngle) * sweepR
     );
-    radarGrad.addColorStop(0, hslToCss(orbHue, 90, 65, 0.38));
+    radarGrad.addColorStop(0, hslToCss(orbHue, 90, 65, 0.38 * alphaMult));
     radarGrad.addColorStop(1, hslToCss(orbHue + 70, 95, 75, 0));
     ctx.fillStyle = radarGrad;
     ctx.beginPath();
@@ -930,10 +968,10 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
     ctx.fill();
 
     ctx.setLineDash([4, 6]);
-    ctx.strokeStyle = hslToCss(orbHue + 50, 95, 70, 0.35 + melodyIntensity * 0.4);
+    ctx.strokeStyle = hslToCss(orbHue + 50, 95, 70, (0.35 + melodyIntensity * 0.4) * alphaMult);
     ctx.lineWidth = 1.1;
     ctx.beginPath();
-    ctx.arc(0, 0, r + 9 + smoothHigh * 10, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, rxFrame + 9 + smoothHigh * 10, ryFrame + 9 + smoothHigh * 10, 0, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
   } else if (fxMode === 'crystal_shards') {
@@ -941,7 +979,7 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
     const cageSides = 6;
     const cageCount = layeredBg ? 1 : 2;
     for (let c = 0; c < cageCount; c++) {
-      const cageR = r + 7 + c * 6 + melodyIntensity * 8 + beatKick * 7;
+      const cageR = rMax + 7 + c * 6 + melodyIntensity * 8 + beatKick * 7;
       const cageRot = phase * (c === 0 ? 1.1 : -1.5) + c * 0.5;
       ctx.beginPath();
       for (let v = 0; v <= cageSides; v++) {
@@ -1123,6 +1161,36 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
       ctx.arc(headPos.x, headPos.y, 1.8 + melodyIntensity * 0.9, 0, Math.PI * 2);
       ctx.fill();
     }
+  } else if (fxMode === 'canvas_bloom') {
+    // Canvas-size luminous swell aura that softly fades in translucency as the sphere expands
+    strokeBaseGlowShape(1.1);
+
+    const haloRings = layeredBg ? 1 : 2;
+    const swellProgress = Math.max(0, Math.min(1, (1 - alphaMult) / 0.88));
+    for (let ring = 0; ring < haloRings; ring++) {
+      const expand = 1 + 0.045 * (ring + 1) + swellProgress * (0.04 + ring * 0.035);
+      const ringAlpha =
+        (0.18 + melodyIntensity * 0.28 + swellProgress * 0.16) *
+        alphaMult *
+        (ring === 0 ? 1 : 0.62);
+      const ringHue = (orbHue + ring * 68 + phase * 18) % 360;
+
+      ctx.save();
+      ctx.scale(expand, expand);
+      traceSmoothPolygon(ctx, scratchX, scratchY, smoothCurve);
+      ctx.strokeStyle = createContourGradient(
+        ctx,
+        rMax + 22,
+        ringHue,
+        gradAngle + ring * 1.1,
+        sat,
+        Math.min(94, light + 12),
+        ringAlpha
+      );
+      ctx.lineWidth = (1.6 + melodyIntensity * 1.8) * (ring === 0 ? 1 : 0.72);
+      ctx.stroke();
+      ctx.restore();
+    }
   } else {
     // combo_aurora_spark: glowing wavy contour + beat spark spikes + subtle micro-arcs
     strokeBaseGlowShape(1.05);
@@ -1130,10 +1198,10 @@ export function renderOrbFxFrame(params: RenderOrbFxParams): void {
       const spikeCount = layeredBg ? 4 : 8;
       for (let s = 0; s < spikeCount; s++) {
         const k = Math.floor(((s / spikeCount) * CONTOUR_SEGMENTS + frameCounter * 0.3) % CONTOUR_SEGMENTS);
-        const ux = geom.x[k] / geom.r[k];
-        const uy = geom.y[k] / geom.r[k];
+        const ux = scratchUx[k];
+        const uy = scratchUy[k];
         const len = 5 + melodyIntensity * 14 + beatKick * 12;
-        ctx.strokeStyle = hslToCss((orbHue + s * 45) % 360, 100, 78, 0.45 + melodyIntensity * 0.5);
+        ctx.strokeStyle = hslToCss((orbHue + s * 45) % 360, 100, 78, (0.45 + melodyIntensity * 0.5) * alphaMult);
         ctx.lineWidth = 1.2 + beatKick * 1.4;
         ctx.beginPath();
         ctx.moveTo(scratchX[k], scratchY[k]);
