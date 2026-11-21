@@ -3,12 +3,12 @@ import { getTranslations } from '../i18n/translations';
 import { Track } from '../types/audio';
 import { fetchAudiusProfileTracks } from './audiusApi';
 
-const AUDIO_EXT_RE = /\.(mp3|wav|flac|ogg|m4a|aac|opus)(\?.*)?$/i;
+const AUDIO_EXT_RE = /\.(mp3|wav|flac|ogg|m4a|aac|aacp|opus|mp2)(\?.*)?$/i;
 const VIDEO_EXT_RE = /\.(mp4|webm|mov|m4v)(\?.*)?$/i;
 const NON_STREAM_DOC_EXT_RE =
   /\.(html?|php|asp|aspx|jsp|json|xml|rss|txt|m3u8?|pls)(\?.*)?$/i;
 const RADIO_STREAM_PATH_RE =
-  /(?:[-_](?:32|48|56|64|80|96|112|128|160|192|224|256|320)[-_](?:mp3|aac|aacp|ogg|opus|flac|m4a)|\/(?:stream|listen|radio|live|mp3|aac|aacp|ogg|opus)(?:\/\d*)?|\/;[^/?#]*)$/i;
+  /(?:[-_](?:32|48|56|64|80|96|112|128|160|192|224|256|320)[-_](?:mp3|aac|aacp|ogg|opus|flac|m4a)|(?:mp3|aac|aacp|ogg|opus|flac)[-_](?:32|48|56|64|80|96|112|128|160|192|224|256|320)|\/(?:stream|listen|radio|live|mp3|aac|aacp|ogg|opus|flac)(?:\/\d*)?|\/;[^/?#]*)$/i;
 const RADIO_HOST_RE = /(^|\.)(somafm\.com|musicradio\.com|streamguys\d*\.com|icecast|shoutcast|radiostream)/i;
 
 function isLikelyDirectAudioStreamUrl(parsedUrl: URL): boolean {
@@ -45,7 +45,6 @@ function probeAudioElementPlayable(url: string): Promise<boolean> {
   if (typeof Audio === 'undefined') return Promise.resolve(false);
   return new Promise((resolve) => {
     const probe = new Audio();
-    probe.crossOrigin = 'anonymous';
     probe.preload = 'metadata';
     probe.muted = true;
     let settled = false;
@@ -95,11 +94,39 @@ function titleFromUrl(url: string, fallbackIndex: number): string {
   }
 }
 
+function upgradeInsecureUrlIfNeeded(resolvedUrl: string, baseUrl?: string): string {
+  try {
+    const parsed = new URL(resolvedUrl);
+    if (parsed.protocol !== 'http:') return resolvedUrl;
+    if (parsed.port && parsed.port !== '80' && parsed.port !== '443') {
+      return resolvedUrl;
+    }
+    const isLocalHost =
+      parsed.hostname === 'localhost' ||
+      parsed.hostname === '127.0.0.1' ||
+      parsed.hostname === '[::1]';
+    if (isLocalHost) return resolvedUrl;
+    const pageIsHttps =
+      typeof window !== 'undefined' && window.location?.protocol === 'https:';
+    const baseIsHttps = Boolean(baseUrl && /^https:/i.test(baseUrl));
+    if (pageIsHttps || baseIsHttps) {
+      parsed.protocol = 'https:';
+      return parsed.toString();
+    }
+  } catch {
+    // ignore invalid URLs
+  }
+  return resolvedUrl;
+}
+
 function parseM3uPlaylist(text: string, baseUrl: string): Track[] {
   const lines = text.split(/\r?\n/).map((l) => l.trim());
   const tracks: Track[] = [];
   let pendingTitle = '';
   let pendingArtist = '';
+  let lastRadioTitle = '';
+  let lastRadioArtist = '';
+  let lastRadioPath = '';
 
   for (const line of lines) {
     if (!line) continue;
@@ -120,13 +147,36 @@ function parseM3uPlaylist(text: string, baseUrl: string): Track[] {
     if (line.startsWith('#')) continue;
 
     try {
-      const resolved = new URL(line, baseUrl).toString();
+      const resolved = upgradeInsecureUrlIfNeeded(new URL(line, baseUrl).toString(), baseUrl);
       const parsedEntry = new URL(resolved);
       const isRadioEntry = isLikelyDirectAudioStreamUrl(parsedEntry);
+      const sameMirrorPath = Boolean(
+        isRadioEntry && lastRadioPath && parsedEntry.pathname === lastRadioPath
+      );
+      const entryTitle =
+        pendingTitle ||
+        (isRadioEntry
+          ? (sameMirrorPath && lastRadioTitle) || 'RadioFM'
+          : titleFromUrl(resolved, tracks.length));
+      const entryArtist =
+        pendingArtist ||
+        (isRadioEntry && sameMirrorPath && lastRadioArtist) ||
+        parsedEntry.hostname;
+
+      if (isRadioEntry) {
+        if (pendingTitle) lastRadioTitle = pendingTitle;
+        if (pendingArtist) lastRadioArtist = pendingArtist;
+        lastRadioPath = parsedEntry.pathname;
+      } else {
+        lastRadioTitle = '';
+        lastRadioArtist = '';
+        lastRadioPath = '';
+      }
+
       tracks.push({
         id: `url-m3u-${tracks.length}-${resolved}`,
-        title: pendingTitle || (isRadioEntry ? 'RadioFM' : titleFromUrl(resolved, tracks.length)),
-        artist: pendingArtist || parsedEntry.hostname,
+        title: entryTitle,
+        artist: entryArtist,
         cover: DEFAULT_COVER_IMAGE,
         src: resolved,
         sourceName: isRadioEntry ? 'RadioFM' : `URL: ${new URL(baseUrl).hostname}`,
@@ -163,7 +213,7 @@ function parsePlsPlaylist(text: string, baseUrl: string): Track[] {
   for (const [, entry] of entries) {
     if (!entry.file) continue;
     try {
-      const resolved = new URL(entry.file, baseUrl).toString();
+      const resolved = upgradeInsecureUrlIfNeeded(new URL(entry.file, baseUrl).toString(), baseUrl);
       tracks.push({
         id: `url-pls-${tracks.length}-${resolved}`,
         title: entry.title || 'RadioFM',
@@ -204,12 +254,14 @@ function parseRssFeed(xmlText: string, baseUrl: string): Track[] {
     const itemImage =
       item.querySelector('itunes\\:image')?.getAttribute('href') || channelImage;
 
+    const safeUrl = upgradeInsecureUrlIfNeeded(new URL(rawUrl, baseUrl).toString(), baseUrl);
+
     tracks.push({
-      id: `url-rss-${tracks.length}-${rawUrl}`,
-      title: itemTitle || titleFromUrl(rawUrl, tracks.length),
+      id: `url-rss-${tracks.length}-${safeUrl}`,
+      title: itemTitle || titleFromUrl(safeUrl, tracks.length),
       artist: itemAuthor,
       cover: itemImage || DEFAULT_COVER_IMAGE,
-      src: rawUrl,
+      src: safeUrl,
       sourceName: `RSS: ${channelTitle}`,
     });
   }
@@ -248,7 +300,7 @@ function parseJsonPlaylist(data: unknown, baseUrl: string): Track[] {
 
   for (const entry of list) {
     if (typeof entry === 'string') {
-      const resolved = new URL(entry, baseUrl).toString();
+      const resolved = upgradeInsecureUrlIfNeeded(new URL(entry, baseUrl).toString(), baseUrl);
       tracks.push({
         id: `url-json-${tracks.length}-${resolved}`,
         title: titleFromUrl(resolved, tracks.length),
@@ -261,7 +313,7 @@ function parseJsonPlaylist(data: unknown, baseUrl: string): Track[] {
       const item = entry as RawJsonTrack;
       const rawSrc = item.src || item.url || item.stream || item.file;
       if (!rawSrc || typeof rawSrc !== 'string') continue;
-      const resolved = new URL(rawSrc, baseUrl).toString();
+      const resolved = upgradeInsecureUrlIfNeeded(new URL(rawSrc, baseUrl).toString(), baseUrl);
       tracks.push({
         id: `url-json-${tracks.length}-${resolved}`,
         title: item.title || item.name || titleFromUrl(resolved, tracks.length),
@@ -398,14 +450,15 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
     .filter(Boolean);
   if (lines.length > 1 && lines.every((l) => /^https?:\/\//i.test(l))) {
     const tracks: Track[] = lines.map((line, idx) => {
-      const parsedLine = new URL(line);
+      const safeLine = upgradeInsecureUrlIfNeeded(line);
+      const parsedLine = new URL(safeLine);
       const isRadioLine = isLikelyDirectAudioStreamUrl(parsedLine);
       return {
-        id: `url-direct-${idx}-${line}`,
-        title: isRadioLine ? 'RadioFM' : titleFromUrl(line, idx),
+        id: `url-direct-${idx}-${safeLine}`,
+        title: isRadioLine ? 'RadioFM' : titleFromUrl(safeLine, idx),
         artist: parsedLine.hostname,
         cover: DEFAULT_COVER_IMAGE,
-        src: line,
+        src: safeLine,
         sourceName: isRadioLine ? 'RadioFM' : t.urlListSourceName,
         ...(isRadioLine ? { mediaType: 'audio' as const, isRadio: true } : {}),
       };
@@ -419,7 +472,8 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
 
   let parsedUrl: URL;
   try {
-    parsedUrl = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+    const rawWithProto = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    parsedUrl = new URL(rawWithProto);
   } catch {
     throw new Error(t.errInvalidUrl);
   }
@@ -480,11 +534,62 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
     return buildRadioStreamResult(normalizedUrl, parsedUrl);
   }
 
-  // 5. Try fetching JSON / M3U / PLS / RSS / HTML index from URL
-  let res: Response;
+  // 5. Try fetching JSON / M3U / PLS / RSS / HTML index from URL (with server proxy fallback)
+  const tryProxyFetch = async (): Promise<
+    | { kind: 'response'; response: Response }
+    | { kind: 'stream'; streamType: string }
+    | null
+  > => {
+    try {
+      const proxyRes = await fetch(
+        `/api/playlist-proxy?url=${encodeURIComponent(normalizedUrl)}`
+      );
+      if (proxyRes.headers.get('X-YRitmX-Proxy') !== '1') {
+        return null;
+      }
+      const streamType = proxyRes.headers.get('X-YRitmX-Stream-Type');
+      if (streamType) {
+        return { kind: 'stream', streamType };
+      }
+      return { kind: 'response', response: proxyRes };
+    } catch {
+      return null;
+    }
+  };
+
+  let res: Response | null = null;
+  let directFetchFailed = false;
   try {
     res = await fetch(normalizedUrl);
   } catch {
+    directFetchFailed = true;
+  }
+
+  if (directFetchFailed || (res && !res.ok)) {
+    const proxied = await tryProxyFetch();
+    if (proxied?.kind === 'stream') {
+      const isAudioRadio = proxied.streamType.startsWith('audio/');
+      if (isAudioRadio) {
+        return buildRadioStreamResult(normalizedUrl, parsedUrl);
+      }
+      const track: Track = {
+        id: `url-stream-${normalizedUrl}`,
+        title: titleFromUrl(normalizedUrl, 0),
+        artist: parsedUrl.hostname,
+        cover: DEFAULT_COVER_IMAGE,
+        src: normalizedUrl,
+        sourceName: `${t.urlStreamPrefix}: ${parsedUrl.hostname}`,
+        mediaType: 'video',
+      };
+      return { tracks: [track], label: track.title, normalizedUrl };
+    }
+    if (proxied?.kind === 'response' && proxied.response.ok) {
+      res = proxied.response;
+      directFetchFailed = false;
+    }
+  }
+
+  if (directFetchFailed || !res) {
     if (!NON_STREAM_DOC_EXT_RE.test(parsedUrl.pathname)) {
       const playable = await probeAudioElementPlayable(normalizedUrl);
       if (playable) {
@@ -508,8 +613,13 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
   }
 
   const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  const isPlaylistDoc =
+    NON_STREAM_DOC_EXT_RE.test(parsedUrl.pathname) ||
+    contentType.includes('mpegurl') ||
+    contentType.includes('scpls') ||
+    contentType.includes('playlist');
 
-  if (contentType.startsWith('audio/') || contentType.startsWith('video/')) {
+  if (!isPlaylistDoc && (contentType.startsWith('audio/') || contentType.startsWith('video/'))) {
     void res.body?.cancel?.().catch(() => {});
     const isAudioRadio = contentType.startsWith('audio/');
     const track: Track = {
@@ -557,7 +667,12 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
     if (tracks.length === 0) {
       throw new Error(t.errM3uNoTracks);
     }
-    return { tracks, label: `${t.playlistTitle}: ${parsedUrl.hostname}`, normalizedUrl };
+    const allRadio = tracks.every((tr) => tr.isRadio);
+    const radioLabel =
+      allRadio && tracks[0]?.title && tracks[0].title !== 'RadioFM'
+        ? `RadioFM: ${tracks[0].title}`
+        : `${t.playlistTitle}: ${parsedUrl.hostname}`;
+    return { tracks, label: radioLabel, normalizedUrl };
   }
 
   if (contentType.includes('xml') || bodyText.includes('<rss') || bodyText.includes('<enclosure')) {
@@ -576,7 +691,10 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
 
   if (links.length > 0) {
     const tracks: Track[] = links.map((href, idx) => {
-      const resolved = new URL(href, normalizedUrl).toString();
+      const resolved = upgradeInsecureUrlIfNeeded(
+        new URL(href, normalizedUrl).toString(),
+        normalizedUrl
+      );
       return {
         id: `url-dir-${idx}-${resolved}`,
         title: titleFromUrl(resolved, idx),

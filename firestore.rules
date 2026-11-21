@@ -1,0 +1,210 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 4.1: Global default-deny catch-all safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Pillar 3: Reusable hardened primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Pillar 1: Master Gate lookup on parent user workspace document (used for single-doc ops only, never inside list)
+    function hasUserWorkspace(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId)) &&
+        get(/databases/$(database)/documents/users/$(userId)).data.ownerId == request.auth.uid;
+    }
+
+    // Pillar 2: Entity validation blueprints synchronized with firebase-blueprint.json
+    function isValidUserAccount(data, userId) {
+      return data.keys().hasAll(['ownerId', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'createdAt', 'updatedAt']) &&
+        data.ownerId is string &&
+        data.ownerId == userId &&
+        isValidId(data.ownerId) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAudiusProfile(data, userId) {
+      return data.keys().hasAll(['ownerId', 'handle', 'isActive', 'addedAt', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'handle', 'isActive', 'addedAt', 'createdAt', 'updatedAt']) &&
+        data.ownerId is string &&
+        data.ownerId == userId &&
+        isValidId(data.ownerId) &&
+        data.handle is string &&
+        data.handle.size() >= 1 &&
+        data.handle.size() <= 100 &&
+        data.handle.matches('^[a-zA-Z0-9_.\\-]+$') &&
+        data.isActive is bool &&
+        data.addedAt is number &&
+        data.addedAt >= 0 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUrlSource(data, userId) {
+      return data.keys().hasAll(['ownerId', 'url', 'label', 'isActive', 'addedAt', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'url', 'label', 'isActive', 'addedAt', 'createdAt', 'updatedAt']) &&
+        data.ownerId is string &&
+        data.ownerId == userId &&
+        isValidId(data.ownerId) &&
+        data.url is string &&
+        data.url.size() >= 4 &&
+        data.url.size() <= 2048 &&
+        data.url.matches('^https?://[\\s\\S]+') &&
+        data.label is string &&
+        data.label.size() >= 1 &&
+        data.label.size() <= 200 &&
+        data.isActive is bool &&
+        data.addedAt is number &&
+        data.addedAt >= 0 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidFolderBookmark(data, userId) {
+      return data.keys().hasAll(['ownerId', 'name', 'trackCount', 'addedAt', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'name', 'trackCount', 'addedAt', 'createdAt', 'updatedAt']) &&
+        data.ownerId is string &&
+        data.ownerId == userId &&
+        isValidId(data.ownerId) &&
+        data.name is string &&
+        data.name.size() >= 1 &&
+        data.name.size() <= 200 &&
+        data.trackCount is number &&
+        data.trackCount >= 0 &&
+        data.trackCount <= 50000 &&
+        data.addedAt is number &&
+        data.addedAt >= 0 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isValidId(userId) &&
+        isOwner(userId) &&
+        isValidUserAccount(incoming(), userId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(userId) &&
+        isOwner(userId) &&
+        isValidUserAccount(incoming(), userId) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['updatedAt']);
+      allow delete: if false;
+
+      match /audiusProfiles/{profileId} {
+        allow get: if isValidId(userId) &&
+          isValidId(profileId) &&
+          isOwner(userId) &&
+          hasUserWorkspace(userId);
+        allow list: if isValidId(userId) &&
+          isOwner(userId) &&
+          resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(userId) &&
+          isValidId(profileId) &&
+          isOwner(userId) &&
+          isValidAudiusProfile(incoming(), userId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          hasUserWorkspace(userId);
+        allow update: if isValidId(userId) &&
+          isValidId(profileId) &&
+          isOwner(userId) &&
+          isValidAudiusProfile(incoming(), userId) &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          hasUserWorkspace(userId) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['handle', 'isActive', 'addedAt', 'updatedAt']);
+        allow delete: if isValidId(userId) &&
+          isValidId(profileId) &&
+          isOwner(userId) &&
+          hasUserWorkspace(userId);
+      }
+
+      match /urlSources/{urlId} {
+        allow get: if isValidId(userId) &&
+          isValidId(urlId) &&
+          isOwner(userId) &&
+          hasUserWorkspace(userId);
+        allow list: if isValidId(userId) &&
+          isOwner(userId) &&
+          resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(userId) &&
+          isValidId(urlId) &&
+          isOwner(userId) &&
+          isValidUrlSource(incoming(), userId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          hasUserWorkspace(userId);
+        allow update: if isValidId(userId) &&
+          isValidId(urlId) &&
+          isOwner(userId) &&
+          isValidUrlSource(incoming(), userId) &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          hasUserWorkspace(userId) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['url', 'label', 'isActive', 'addedAt', 'updatedAt']);
+        allow delete: if isValidId(userId) &&
+          isValidId(urlId) &&
+          isOwner(userId) &&
+          hasUserWorkspace(userId);
+      }
+
+      match /folderBookmarks/{folderId} {
+        allow get: if isValidId(userId) &&
+          isValidId(folderId) &&
+          isOwner(userId) &&
+          hasUserWorkspace(userId);
+        allow list: if isValidId(userId) &&
+          isOwner(userId) &&
+          resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(userId) &&
+          isValidId(folderId) &&
+          isOwner(userId) &&
+          isValidFolderBookmark(incoming(), userId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          hasUserWorkspace(userId);
+        allow update: if isValidId(userId) &&
+          isValidId(folderId) &&
+          isOwner(userId) &&
+          isValidFolderBookmark(incoming(), userId) &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          hasUserWorkspace(userId) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'trackCount', 'addedAt', 'updatedAt']);
+        allow delete: if isValidId(userId) &&
+          isValidId(folderId) &&
+          isOwner(userId) &&
+          hasUserWorkspace(userId);
+      }
+    }
+  }
+}

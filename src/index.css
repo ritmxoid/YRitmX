@@ -109,11 +109,86 @@ input[type="range"] {
   animation: mystic-aura 9s ease-in-out infinite;
 }
 
+@keyframes fm-btn-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 10px rgba(34, 211, 238, 0.35),
+      0 0 22px rgba(168, 85, 247, 0.25),
+      inset 0 0 10px rgba(34, 211, 238, 0.16);
+    border-color: rgba(56, 189, 248, 0.45);
+  }
+  50% {
+    box-shadow:
+      0 0 18px rgba(232, 121, 249, 0.6),
+      0 0 34px rgba(34, 211, 238, 0.42),
+      inset 0 0 14px rgba(232, 121, 249, 0.28);
+    border-color: rgba(232, 121, 249, 0.72);
+  }
+}
+
+@keyframes fm-btn-shimmer {
+  0% {
+    transform: translateX(-150%) skewX(-22deg);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.85;
+  }
+  65% {
+    opacity: 0.45;
+  }
+  100% {
+    transform: translateX(220%) skewX(-22deg);
+    opacity: 0;
+  }
+}
+
+@keyframes fm-fly-dissolve {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
+    filter: blur(4px);
+  }
+  16% {
+    opacity: 1;
+    transform: translateY(-6px) scale(1.04);
+    filter: blur(0px);
+  }
+  55% {
+    opacity: 0.96;
+    transform: translateY(-16px) scale(1);
+    filter: blur(0px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-42px) scale(0.95);
+    filter: blur(7px);
+  }
+}
+
+.animate-fm-btn-glow {
+  animation: fm-btn-glow 2.6s ease-in-out infinite;
+}
+
+.animate-fm-btn-shimmer {
+  animation: fm-btn-shimmer 2.8s ease-in-out infinite;
+}
+
+.animate-fm-fly-dissolve {
+  animation: fm-fly-dissolve 2.1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-mystic-pulse,
   .animate-mystic-shimmer,
-  .animate-mystic-aura {
+  .animate-mystic-aura,
+  .animate-fm-btn-glow,
+  .animate-fm-btn-shimmer {
     animation: none;
+  }
+  .animate-fm-fly-dissolve {
+    animation-duration: 1.2s;
   }
 }
 

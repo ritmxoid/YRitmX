@@ -80,9 +80,25 @@ import {
   VisualDNA,
 } from './types/audio';
 import { useI18n } from './i18n/I18nContext';
+import { getCloudMessages } from './i18n/cloudMessages';
 import { getHelpMessages } from './i18n/helpMessages';
 import { getStudioMessages } from './i18n/studioMessages';
 import { trackEvent } from './utils/analytics';
+import {
+  CloudUserInfo,
+  deleteCloudSourceItem,
+  fetchCloudMediaSources,
+  registerWithEmailCloud,
+  saveCloudMediaSources,
+  sendPasswordResetCloud,
+  signInWithEmailCloud,
+  signInWithGoogleCloud,
+  signOutCloud,
+  subscribeCloudAuth,
+  toAudiusDocId,
+  toFolderDocId,
+  toUrlDocId,
+} from './utils/firebaseCloud';
 import {
   exportStudioVideoOffline,
   isExportAbortError,
@@ -103,10 +119,12 @@ import {
   deleteFolderFiles,
   getDirectoryHandle,
   getFolderFiles,
+  getSavedFoldersMeta,
   queryDirectoryPermission,
   readAudioFilesFromDirectoryHandle,
   saveDirectoryHandle,
   saveFolderFiles,
+  saveSavedFoldersMeta,
 } from './utils/folderHandleStore';
 import { parseAudioMetadata } from './utils/id3Parser';
 import {
@@ -118,11 +136,17 @@ import {
   SavedPlaybackSession,
 } from './utils/playbackSession';
 import { loadTracksFromUrlSource } from './utils/urlSourceParser';
+import {
+  DEFAULT_FM_STATIONS,
+  findDefaultFmStationByUrl,
+  getFmStationLabel,
+} from './constants/radioStations';
 
 const STORAGE_PROFILES_KEY = 'yritmx_profiles';
 const STORAGE_HANDLE_KEY = 'yritmx_current_handle';
 const STORAGE_FOLDERS_KEY = 'yritmx_saved_folders';
 const STORAGE_URLS_KEY = 'yritmx_saved_urls';
+const STORAGE_DEFAULT_FM_SEEDED_KEY = 'yritmx_default_fm_v1';
 const STORAGE_CAPTIONS_KEY = 'yritmx_orb_captions';
 const STORAGE_ORBS_KEY = 'yritmx_show_orbs';
 const STORAGE_INSTALL_PROMO_KEY = 'yritmx_install_promo_seen';
@@ -272,12 +296,14 @@ export default function App() {
   const { t, lang } = useI18n();
   const studioT = useMemo(() => getStudioMessages(lang), [lang]);
   const helpT = useMemo(() => getHelpMessages(lang), [lang]);
+  const cloudT = useMemo(() => getCloudMessages(lang), [lang]);
   const initialPrefsRef = useRef(loadPlayerPrefs());
   const initialSessionRef = useRef<SavedPlaybackSession | null>(loadPlaybackSession());
   const initialRestoreConsumedRef = useRef(false);
 
   const masterCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const fallbackAudioRef = useRef<HTMLAudioElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const customBgVideoRef = useRef<HTMLVideoElement | null>(null);
   const stageBgAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -331,7 +357,18 @@ export default function App() {
   const isRecordArmedRef = useRef(false);
   const isStudioModeRef = useRef(false);
   const imageElapsedRef = useRef(0);
+  const usingDirectAudioFallbackRef = useRef(false);
+  const playbackIntentRef = useRef(false);
+  const proxyAttemptedKeyRef = useRef('');
+  const fallbackAttemptedKeyRef = useRef('');
+  const httpsUpgradeAttemptedKeyRef = useRef('');
+  const mirrorRetriesRef = useRef(0);
+  const lastFmIndexRef = useRef(-1);
+  const fmFlyoutSeqRef = useRef(0);
+  const fmFlyoutTimerRef = useRef(0);
 
+  const [fmFlyout, setFmFlyout] = useState<{ id: number; label: string } | null>(null);
+  const [usingDirectAudioFallback, setUsingDirectAudioFallback] = useState(false);
   const [isStudioMode, setIsStudioMode] = useState(false);
   const [isRecordArmed, setIsRecordArmed] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -437,15 +474,61 @@ export default function App() {
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
 
   const [savedUrls, setSavedUrls] = useState<SavedUrlEntry[]>(() => {
+    let existing: SavedUrlEntry[] = [];
     try {
       const raw = localStorage.getItem(STORAGE_URLS_KEY);
       const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-      return Array.isArray(parsed) ? (parsed as SavedUrlEntry[]) : [];
+      if (Array.isArray(parsed)) {
+        existing = parsed as SavedUrlEntry[];
+      }
     } catch {
-      return [];
+      existing = [];
     }
+
+    let alreadySeeded = false;
+    try {
+      alreadySeeded = localStorage.getItem(STORAGE_DEFAULT_FM_SEEDED_KEY) === '1';
+    } catch {
+      alreadySeeded = false;
+    }
+
+    if (!alreadySeeded || existing.length === 0) {
+      const now = Date.now();
+      const existingUrlSet = new Set(existing.map((e) => e.url.trim()));
+      const additions: SavedUrlEntry[] = [];
+      DEFAULT_FM_STATIONS.forEach((station, idx) => {
+        if (!existingUrlSet.has(station.url)) {
+          additions.push({
+            id: `url-${hashString(station.url)}`,
+            url: station.url,
+            label: `RadioFM: ${getFmStationLabel(station, lang)}`,
+            addedAt: now - idx,
+          });
+        }
+      });
+      const merged = [...existing, ...additions];
+      try {
+        localStorage.setItem(STORAGE_URLS_KEY, JSON.stringify(merged));
+        localStorage.setItem(STORAGE_DEFAULT_FM_SEEDED_KEY, '1');
+      } catch {
+        // ignore storage errors
+      }
+      return merged;
+    }
+
+    return existing;
   });
   const [activeUrlId, setActiveUrlId] = useState<string | null>(null);
+
+  const [cloudUser, setCloudUser] = useState<CloudUserInfo | null>(null);
+  const [isSavingToCloud, setIsSavingToCloud] = useState(false);
+  const cloudUserRef = useRef<CloudUserInfo | null>(null);
+  const cloudSyncFetchedUidRef = useRef<string | null>(null);
+  const savedProfilesRef = useRef<string[]>(savedProfiles);
+  const currentHandleRef = useRef<string>(currentHandle);
+  const savedUrlsRef = useRef<SavedUrlEntry[]>(savedUrls);
+  const activeUrlIdRef = useRef<string | null>(activeUrlId);
+  const savedFoldersRef = useRef<SavedFolderEntry[]>(savedFolders);
 
   const [isSourcesOpen, setIsSourcesOpen] = useState(false);
   const [sourcesTab, setSourcesTab] = useState<SourceTab>('audius');
@@ -501,6 +584,190 @@ export default function App() {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 3200);
   }, []);
+
+  useEffect(() => {
+    savedProfilesRef.current = savedProfiles;
+  }, [savedProfiles]);
+
+  useEffect(() => {
+    currentHandleRef.current = currentHandle;
+  }, [currentHandle]);
+
+  useEffect(() => {
+    savedUrlsRef.current = savedUrls;
+  }, [savedUrls]);
+
+  // Keep default FM station labels localized when language changes
+  useEffect(() => {
+    setSavedUrls((prev) => {
+      let changed = false;
+      const next = prev.map((entry) => {
+        const matched = findDefaultFmStationByUrl(entry.url);
+        if (!matched) return entry;
+        const localizedLabel = `RadioFM: ${getFmStationLabel(matched, lang)}`;
+        const nextUrl = matched.url;
+        const nextId = `url-${hashString(nextUrl)}`;
+        if (entry.label === localizedLabel && entry.url === nextUrl && entry.id === nextId) {
+          return entry;
+        }
+        changed = true;
+        return {
+          ...entry,
+          id: nextId,
+          url: nextUrl,
+          label: localizedLabel,
+        };
+      });
+      if (!changed) return prev;
+      try {
+        localStorage.setItem(STORAGE_URLS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, [lang]);
+
+  useEffect(() => {
+    activeUrlIdRef.current = activeUrlId;
+  }, [activeUrlId]);
+
+  useEffect(() => {
+    savedFoldersRef.current = savedFolders;
+  }, [savedFolders]);
+
+  // Hydrate saved local folder metadata from IndexedDB in case localStorage was cleared
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const idbFolders = await getSavedFoldersMeta();
+      if (cancelled || idbFolders.length === 0) return;
+      setSavedFolders((prev) => {
+        const merged = [...prev];
+        let changed = false;
+        for (const item of idbFolders) {
+          if (!merged.some((f) => f.id === item.id || f.name === item.name)) {
+            merged.push(item);
+            changed = true;
+          }
+        }
+        if (!changed) return prev;
+        try {
+          localStorage.setItem(STORAGE_FOLDERS_KEY, JSON.stringify(merged));
+        } catch {
+          // ignore
+        }
+        return merged;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const syncFromCloudForUser = useCallback(
+    async (uid: string) => {
+      if (cloudSyncFetchedUidRef.current === uid) return;
+      cloudSyncFetchedUidRef.current = uid;
+      try {
+        const snapshot = await fetchCloudMediaSources(uid);
+        let addedCount = 0;
+
+        if (snapshot.audiusProfiles.length > 0) {
+          const currentProfiles = savedProfilesRef.current;
+          const lowerSet = new Set(currentProfiles.map((p) => p.toLowerCase()));
+          const toAdd = snapshot.audiusProfiles
+            .map((p) => p.handle)
+            .filter((handle) => {
+              const lower = handle.toLowerCase();
+              if (lowerSet.has(lower)) return false;
+              lowerSet.add(lower);
+              return true;
+            });
+          if (toAdd.length > 0) {
+            addedCount += toAdd.length;
+            const nextProfiles = [...currentProfiles, ...toAdd];
+            setSavedProfiles(nextProfiles);
+            try {
+              localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(nextProfiles));
+            } catch {
+              // ignore
+            }
+          }
+        }
+
+        if (snapshot.urlEntries.length > 0) {
+          const currentUrls = savedUrlsRef.current;
+          const urlSet = new Set(currentUrls.map((u) => u.url.trim()));
+          const toAddUrls = snapshot.urlEntries.filter((entry) => {
+            const norm = entry.url.trim();
+            if (urlSet.has(norm)) return false;
+            urlSet.add(norm);
+            return true;
+          });
+          if (toAddUrls.length > 0) {
+            addedCount += toAddUrls.length;
+            const nextUrls = [...currentUrls, ...toAddUrls].sort((a, b) => b.addedAt - a.addedAt);
+            setSavedUrls(nextUrls);
+            try {
+              localStorage.setItem(STORAGE_URLS_KEY, JSON.stringify(nextUrls));
+            } catch {
+              // ignore
+            }
+          }
+        }
+
+        if (snapshot.folderBookmarks.length > 0) {
+          const currentFolders = savedFoldersRef.current;
+          const idSet = new Set(currentFolders.map((f) => f.id));
+          const nameSet = new Set(currentFolders.map((f) => f.name.toLowerCase()));
+          const toAddFolders = snapshot.folderBookmarks.filter((f) => {
+            if (idSet.has(f.id) || nameSet.has(f.name.toLowerCase())) return false;
+            idSet.add(f.id);
+            nameSet.add(f.name.toLowerCase());
+            return true;
+          });
+          if (toAddFolders.length > 0) {
+            addedCount += toAddFolders.length;
+            const nextFolders = [...currentFolders, ...toAddFolders].sort(
+              (a, b) => b.addedAt - a.addedAt
+            );
+            setSavedFolders(nextFolders);
+            try {
+              localStorage.setItem(STORAGE_FOLDERS_KEY, JSON.stringify(nextFolders));
+            } catch {
+              // ignore
+            }
+            void saveSavedFoldersMeta(nextFolders);
+          }
+        }
+
+        if (addedCount > 0) {
+          showToast(cloudT.cloudLoadedToast(addedCount), 'info');
+        }
+      } catch {
+        // Non-fatal: keep offline/local lists usable if Firestore fetch fails
+      }
+    },
+    [cloudT, showToast]
+  );
+
+  // Subscribe to Firebase Auth & automatically merge cloud-saved sources on sign-in
+  useEffect(() => {
+    const unsubscribe = subscribeCloudAuth((user) => {
+      cloudUserRef.current = user;
+      setCloudUser(user);
+
+      if (!user) {
+        cloudSyncFetchedUidRef.current = null;
+        return;
+      }
+
+      void syncFromCloudForUser(user.uid);
+    });
+
+    return () => unsubscribe();
+  }, [syncFromCloudForUser]);
 
   const revokeLocalObjectUrls = useCallback(() => {
     const cachedUrls = new Set<string>();
@@ -995,7 +1262,12 @@ export default function App() {
       const list = playlistRef.current;
       const idx = overrides?.trackIndex ?? currentIndexRef.current;
       const track = list[idx];
-      const activeEl = track?.mediaType === 'video' ? videoRef.current : audioRef.current;
+      const activeEl =
+        track?.mediaType === 'video'
+          ? videoRef.current
+          : usingDirectAudioFallbackRef.current
+            ? fallbackAudioRef.current
+            : audioRef.current;
       const mediaTime = activeEl?.currentTime;
       const resolvedTime =
         overrides?.currentTime ??
@@ -1052,6 +1324,10 @@ export default function App() {
     }
     if (audioRef.current) {
       audioRef.current.volume = level;
+    }
+    if (fallbackAudioRef.current) {
+      fallbackAudioRef.current.volume = level;
+      fallbackAudioRef.current.muted = isMuted;
     }
     if (videoRef.current) {
       videoRef.current.volume = level;
@@ -1324,6 +1600,9 @@ export default function App() {
       if (target?.mediaType === 'video') {
         return videoRef.current;
       }
+      if (usingDirectAudioFallbackRef.current) {
+        return fallbackAudioRef.current;
+      }
       return audioRef.current;
     },
     []
@@ -1332,8 +1611,22 @@ export default function App() {
   const loadTrackIntoMediaElements = useCallback(
     (track: Track | undefined, seekTime = 0) => {
       const audioEl = audioRef.current;
+      const fallbackAudioEl = fallbackAudioRef.current;
       const videoEl = videoRef.current;
       if (!track) return;
+
+      usingDirectAudioFallbackRef.current = false;
+      setUsingDirectAudioFallback(false);
+      proxyAttemptedKeyRef.current = '';
+      fallbackAttemptedKeyRef.current = '';
+      httpsUpgradeAttemptedKeyRef.current = '';
+      if (fallbackAudioEl) {
+        fallbackAudioEl.pause();
+        if (fallbackAudioEl.hasAttribute('src')) {
+          fallbackAudioEl.removeAttribute('src');
+          fallbackAudioEl.load();
+        }
+      }
 
       syncRadioCarouselForTrack(track);
 
@@ -1435,6 +1728,7 @@ export default function App() {
   const startPlaybackSafe = useCallback(
     async (withAudioGraph: boolean, trackOverride?: Track | null) => {
       const target = trackOverride ?? playlistRef.current[currentIndexRef.current] ?? null;
+      playbackIntentRef.current = true;
       if (target?.mediaType === 'image') {
         if (withAudioGraph) ensureAudioGraph();
         setIsPlaying(true);
@@ -1443,7 +1737,7 @@ export default function App() {
       }
       const mediaEl = getActiveMediaElement(target);
       if (!mediaEl) return false;
-      if (withAudioGraph) {
+      if (withAudioGraph && !usingDirectAudioFallbackRef.current) {
         ensureAudioGraph();
       }
       try {
@@ -1452,6 +1746,23 @@ export default function App() {
         setAwaitingAutoplayUnlock(false);
         return true;
       } catch {
+        const targetKey = target ? `${target.id}|${target.src}` : '';
+        const recoveryInFlight =
+          usingDirectAudioFallbackRef.current ||
+          (targetKey !== '' &&
+            (proxyAttemptedKeyRef.current === targetKey ||
+              httpsUpgradeAttemptedKeyRef.current === targetKey));
+        if (recoveryInFlight) {
+          if (
+            usingDirectAudioFallbackRef.current &&
+            fallbackAudioRef.current &&
+            !fallbackAudioRef.current.paused
+          ) {
+            setIsPlaying(true);
+            setAwaitingAutoplayUnlock(false);
+          }
+          return true;
+        }
         setIsPlaying(false);
         return false;
       }
@@ -1467,7 +1778,9 @@ export default function App() {
       if (target?.closest('[data-play-toggle="true"]')) {
         return;
       }
-      ensureAudioGraph();
+      if (!usingDirectAudioFallbackRef.current) {
+        ensureAudioGraph();
+      }
       const mediaEl = getActiveMediaElement();
       if (mediaEl && mediaEl.src) {
         void mediaEl
@@ -1837,6 +2150,7 @@ export default function App() {
           } catch {
             // ignore
           }
+          void saveSavedFoldersMeta(next);
           return next;
         });
 
@@ -1989,8 +2303,15 @@ export default function App() {
       }
 
       const firstRel = files[0]?.webkitRelativePath;
-      const folderName = firstRel ? firstRel.split('/')[0] : t.localFilesLabel;
-      const folderId = `folder-${hashString(folderName + '-' + files.length)}`;
+      const folderName = firstRel
+        ? firstRel.split('/')[0]
+        : files.length === 1
+        ? files[0].name.replace(/\.[^/.]+$/, '') || t.localFilesLabel
+        : t.localFilesLabel;
+      const identitySeed = firstRel
+        ? `${folderName}-${files.length}`
+        : `${folderName}-${files.map((f) => `${f.name}:${f.size}`).join('|')}`;
+      const folderId = `folder-${hashString(identitySeed)}`;
       const matchingPending =
         pendingFolderRestore &&
         (pendingFolderRestore.folderId === folderId ||
@@ -2137,8 +2458,22 @@ export default function App() {
       setIsLoadingUrl(true);
       setLoadError(null);
       pendingSeekRef.current = null;
+      mirrorRetriesRef.current = 0;
       try {
-        const { tracks, label, normalizedUrl } = await loadTracksFromUrlSource(rawUrl);
+        const { tracks: rawTracks, label: rawLabel, normalizedUrl } =
+          await loadTracksFromUrlSource(rawUrl);
+        const matchedStation = findDefaultFmStationByUrl(normalizedUrl);
+        const localizedStationName = matchedStation
+          ? getFmStationLabel(matchedStation, lang)
+          : null;
+        const tracks = localizedStationName
+          ? rawTracks.map((tr) => ({
+              ...tr,
+              title: localizedStationName,
+              sourceName: 'RadioFM',
+            }))
+          : rawTracks;
+        const label = localizedStationName ? `RadioFM: ${localizedStationName}` : rawLabel;
         revokeLocalObjectUrls();
 
         const urlId = `url-${hashString(normalizedUrl)}`;
@@ -2240,6 +2575,7 @@ export default function App() {
     },
     [
       autoVisualPerTrack,
+      lang,
       loadTrackIntoMediaElements,
       persistCurrentSession,
       randomizeVisual,
@@ -2251,6 +2587,124 @@ export default function App() {
       t,
     ]
   );
+
+  const handleCycleFmStation = useCallback(async () => {
+    const activeTrackNow = playlistRef.current[currentIndexRef.current];
+    const currentMatchedIdx = activeTrackNow?.src
+      ? DEFAULT_FM_STATIONS.findIndex((s) => s.url === activeTrackNow.src)
+      : -1;
+    const nextIdx =
+      currentMatchedIdx !== -1
+        ? (currentMatchedIdx + 1) % DEFAULT_FM_STATIONS.length
+        : (lastFmIndexRef.current + 1) % DEFAULT_FM_STATIONS.length;
+    lastFmIndexRef.current = nextIdx;
+
+    const station = DEFAULT_FM_STATIONS[nextIdx];
+    const stationLabel = getFmStationLabel(station, lang);
+    const urlId = `url-${hashString(station.url)}`;
+
+    window.clearTimeout(fmFlyoutTimerRef.current);
+    const flyId = ++fmFlyoutSeqRef.current;
+    setFmFlyout({ id: flyId, label: stationLabel });
+    fmFlyoutTimerRef.current = window.setTimeout(() => {
+      setFmFlyout((prev) => (prev?.id === flyId ? null : prev));
+    }, 2200);
+
+    let host = 'radio';
+    try {
+      host = new URL(station.url).hostname;
+    } catch {
+      // ignore
+    }
+
+    const radioTrack: Track = {
+      id: `url-stream-${station.url}`,
+      title: stationLabel,
+      artist: host,
+      cover: DEFAULT_COVER_IMAGE,
+      src: station.url,
+      sourceName: 'RadioFM',
+      mediaType: 'audio',
+      isRadio: true,
+    };
+
+    revokeLocalObjectUrls();
+    pendingSeekRef.current = null;
+    mirrorRetriesRef.current = 0;
+
+    setSavedUrls((prev) => {
+      if (prev.some((u) => u.url === station.url || u.id === urlId)) {
+        return prev;
+      }
+      const next = [
+        ...prev,
+        {
+          id: urlId,
+          url: station.url,
+          label: `RadioFM: ${stationLabel}`,
+          addedAt: Date.now(),
+        },
+      ];
+      try {
+        localStorage.setItem(STORAGE_URLS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+
+    playlistRef.current = [radioTrack];
+    currentIndexRef.current = 0;
+    setPendingFolderRestore(null);
+    setPlaylist([radioTrack]);
+    setCurrentIndex(0);
+    setCurrentTime(0);
+    setDuration(0);
+    setActiveUrlId(urlId);
+    setActiveFolderId(null);
+
+    activeSessionRef.current = {
+      sourceType: 'url',
+      url: station.url,
+    };
+    initialRestoreConsumedRef.current = true;
+
+    if (autoVisualPerTrack) {
+      randomizeVisual();
+    }
+
+    syncRadioCarouselForTrack(radioTrack, { force: true });
+    loadTrackIntoMediaElements(radioTrack, 0);
+    const started = await startPlaybackSafe(true, radioTrack);
+    if (!started) {
+      setAwaitingAutoplayUnlock(true);
+    }
+
+    persistCurrentSession({
+      sourceType: 'url',
+      url: station.url,
+      trackId: radioTrack.id,
+      trackTitle: radioTrack.title,
+      trackArtist: radioTrack.artist,
+      trackIndex: 0,
+      currentTime: 0,
+      wasPlaying: started,
+    });
+
+    trackEvent('fm_station_switch', {
+      station: station.key,
+      index: nextIdx,
+    });
+  }, [
+    autoVisualPerTrack,
+    lang,
+    loadTrackIntoMediaElements,
+    persistCurrentSession,
+    randomizeVisual,
+    revokeLocalObjectUrls,
+    startPlaybackSafe,
+    syncRadioCarouselForTrack,
+  ]);
 
   // Track browser online/offline transitions smoothly
   useEffect(() => {
@@ -2312,6 +2766,22 @@ export default function App() {
               }
             }
           }
+
+          // Fallback to persisted local IndexedDB blobs (works across reloads, iframes & single-file picks)
+          const cachedFiles = await getFolderFiles(folderId);
+          if (cachedFiles && cachedFiles.length > 0) {
+            await loadParsedAudioFiles(cachedFiles, folderId, folderName, {
+              saveHandle: dirHandle ?? undefined,
+              persistFiles: false,
+              restore,
+              closeModal: false,
+              autoPlay: session.wasPlaying !== false,
+              isInitial: true,
+              toastType: 'opened',
+            });
+            return;
+          }
+
           setPendingFolderRestore({
             folderId,
             folderName,
@@ -2463,8 +2933,16 @@ export default function App() {
             // ignore
           }
         }
+        if (cloudUserRef.current) {
+          void deleteCloudSourceItem(
+            cloudUserRef.current.uid,
+            'audius',
+            toAudiusDocId(target.id)
+          ).catch(() => {});
+        }
         showToast(t.profileRemovedToast(target.label), 'info');
       } else if (target.type === 'folder') {
+        const deletedFolder = savedFoldersRef.current.find((f) => f.id === target.id);
         folderCacheRef.current.delete(target.id);
         void deleteDirectoryHandle(target.id);
         void deleteFolderFiles(target.id);
@@ -2475,11 +2953,20 @@ export default function App() {
           } catch {
             // ignore
           }
+          void saveSavedFoldersMeta(next);
           return next;
         });
+        if (cloudUserRef.current) {
+          void deleteCloudSourceItem(
+            cloudUserRef.current.uid,
+            'folder',
+            toFolderDocId({ id: target.id, name: deletedFolder?.name || target.label })
+          ).catch(() => {});
+        }
         if (activeFolderId === target.id) setActiveFolderId(null);
         showToast(t.folderRemovedToast(target.label), 'info');
       } else if (target.type === 'url') {
+        const deletedUrl = savedUrlsRef.current.find((u) => u.id === target.id);
         setSavedUrls((prev) => {
           const next = prev.filter((u) => u.id !== target.id);
           try {
@@ -2489,6 +2976,13 @@ export default function App() {
           }
           return next;
         });
+        if (cloudUserRef.current && deletedUrl) {
+          void deleteCloudSourceItem(
+            cloudUserRef.current.uid,
+            'url',
+            toUrlDocId(deletedUrl)
+          ).catch(() => {});
+        }
         if (activeUrlId === target.id) setActiveUrlId(null);
         showToast(t.urlRemovedToast(target.label), 'info');
       }
@@ -2978,9 +3472,12 @@ export default function App() {
     }
     if (!mediaEl) return;
 
-    ensureAudioGraph();
+    if (!usingDirectAudioFallbackRef.current) {
+      ensureAudioGraph();
+    }
 
     if (isPlaying) {
+      playbackIntentRef.current = false;
       mediaEl.pause();
       setIsPlaying(false);
       persistCurrentSession({
@@ -2992,6 +3489,7 @@ export default function App() {
         artist: currentTrack?.artist,
       });
     } else {
+      playbackIntentRef.current = true;
       if (!mediaEl.src && currentTrack) {
         mediaEl.src = currentTrack.src;
       }
@@ -3005,7 +3503,7 @@ export default function App() {
           track_title: currentTrack?.title,
           artist: currentTrack?.artist,
         });
-      } else {
+      } else if (!usingDirectAudioFallbackRef.current) {
         showToast(t.streamFailedToast, 'error');
       }
     }
@@ -3138,6 +3636,264 @@ export default function App() {
     trackEvent('audio_seek', { progress_pct: Math.round(ratio * 100) });
   };
 
+  const handleAudioTimeUpdate = (el: HTMLAudioElement) => {
+    setCurrentTime(el.currentTime);
+    if (Number.isFinite(el.duration) && el.duration > 0) {
+      setDuration(el.duration);
+    }
+    const now = Date.now();
+    if (now - lastTimeFlushRef.current >= 2000) {
+      lastTimeFlushRef.current = now;
+      persistCurrentSession({ currentTime: el.currentTime });
+    }
+  };
+
+  const handleAudioDurationChange = (el: HTMLAudioElement) => {
+    if (Number.isFinite(el.duration) && el.duration > 0) {
+      setDuration(el.duration);
+    } else if (
+      el.duration === Infinity &&
+      activeSessionRef.current?.sourceType === 'url'
+    ) {
+      const activeTrackNow = playlistRef.current[currentIndexRef.current];
+      if (
+        activeTrackNow &&
+        activeTrackNow.mediaType !== 'video' &&
+        activeTrackNow.mediaType !== 'image'
+      ) {
+        syncRadioCarouselForTrack({ ...activeTrackNow, isRadio: true });
+      }
+    }
+  };
+
+  const handleAudioLoadedMetadata = (el: HTMLAudioElement) => {
+    if (Number.isFinite(el.duration) && el.duration > 0) {
+      setDuration(el.duration);
+    } else if (
+      el.duration === Infinity &&
+      activeSessionRef.current?.sourceType === 'url'
+    ) {
+      const activeTrackNow = playlistRef.current[currentIndexRef.current];
+      if (
+        activeTrackNow &&
+        activeTrackNow.mediaType !== 'video' &&
+        activeTrackNow.mediaType !== 'image'
+      ) {
+        syncRadioCarouselForTrack({ ...activeTrackNow, isRadio: true });
+      }
+    }
+    const pending = pendingSeekRef.current;
+    if (
+      pending &&
+      (el.src === pending.src || el.currentSrc === pending.src || !pending.src)
+    ) {
+      pendingSeekRef.current = null;
+      const maxTarget =
+        Number.isFinite(el.duration) && el.duration > 1 ? el.duration - 0.5 : pending.time;
+      const targetTime = Math.max(0, Math.min(pending.time, maxTarget));
+      if (targetTime > 0) {
+        try {
+          el.currentTime = targetTime;
+          setCurrentTime(targetTime);
+        } catch {
+          // ignore seek failures on non-seekable streams
+        }
+      }
+    }
+  };
+
+  const handleAudioPause = (el: HTMLAudioElement) => {
+    if (isRecordingRef.current && isPlayingRef.current && !el.ended) {
+      window.setTimeout(() => {
+        if (isRecordingRef.current && isPlayingRef.current && el.paused && !el.ended) {
+          void el.play().catch(() => {});
+        }
+      }, 60);
+    }
+  };
+
+  const handleAudioEnded = (el: HTMLAudioElement) => {
+    // Guard against remote audio CDN connections truncating prematurely mid-track during recording
+    if (
+      isRecordingRef.current &&
+      Number.isFinite(el.duration) &&
+      el.duration > 10 &&
+      el.currentTime < el.duration - 2.5 &&
+      el.src
+    ) {
+      pendingSeekRef.current = { src: el.src, time: el.currentTime };
+      el.load();
+      void el.play().catch(() => {});
+      return;
+    }
+
+    trackEvent('track_complete', {
+      track_title: currentTrack?.title,
+      repeat: isRepeat,
+    });
+    if (isRecordingRef.current) {
+      if (isRepeat) {
+        el.currentTime = 0;
+        void el.play().catch(() => {});
+        return;
+      }
+      const hasLiveSession =
+        cameraOverlayActiveRef.current ||
+        customStageMediaRef.current?.kind === 'camera' ||
+        micEnabledRef.current;
+      if (hasLiveSession) {
+        if (playlistRef.current.length > 1) {
+          const nextIdx = (currentIndexRef.current + 1) % playlistRef.current.length;
+          void selectTrack(nextIdx, true, true);
+        }
+        return;
+      }
+      stopStudioRecording();
+      return;
+    }
+    if (isRepeat) {
+      el.currentTime = 0;
+      void el.play().catch(() => {});
+    } else {
+      nextTrack(true);
+    }
+  };
+
+  const handleAudioStreamError = (source: 'cors' | 'fallback', el: HTMLAudioElement) => {
+    if (playlistRef.current.length === 0) return;
+    if (!el.getAttribute('src')) return;
+    if (source === 'cors' && usingDirectAudioFallbackRef.current) return;
+    if (source === 'fallback' && !usingDirectAudioFallbackRef.current) return;
+
+    const activeTrack = playlistRef.current[currentIndexRef.current];
+    if (!activeTrack || activeTrack.mediaType === 'video' || activeTrack.mediaType === 'image') {
+      return;
+    }
+    const trackKey = `${activeTrack.id}|${activeTrack.src}`;
+    const isUrlOrRadio =
+      Boolean(activeTrack.isRadio) || activeSessionRef.current?.sourceType === 'url';
+
+    // 1) Upgrade plain http:// -> https:// on CORS element first (skip custom ports like :8000)
+    if (
+      source === 'cors' &&
+      /^http:\/\//i.test(el.src) &&
+      !/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(el.src) &&
+      !/^http:\/\/[^/]+:\d+/i.test(el.src) &&
+      httpsUpgradeAttemptedKeyRef.current !== trackKey
+    ) {
+      httpsUpgradeAttemptedKeyRef.current = trackKey;
+      el.src = el.src.replace(/^http:\/\//i, 'https://');
+      el.load();
+      if (playbackIntentRef.current || isPlayingRef.current) {
+        void el.play().catch(() => {});
+      }
+      return;
+    }
+
+    // 2) Bridge via same-origin /api/radio-proxy so CORS, HTTP-only, UA-filtered, or geo-restricted streams play with WebAudio EQ + visualizer
+    if (
+      source === 'cors' &&
+      isUrlOrRadio &&
+      proxyAttemptedKeyRef.current !== trackKey
+    ) {
+      proxyAttemptedKeyRef.current = trackKey;
+      el.src = `/api/radio-proxy?url=${encodeURIComponent(activeTrack.src)}`;
+      el.load();
+      if (playbackIntentRef.current || isPlayingRef.current) {
+        void el
+          .play()
+          .then(() => {
+            setIsPlaying(true);
+            setAwaitingAutoplayUnlock(false);
+          })
+          .catch(() => {});
+      }
+      return;
+    }
+
+    // 3) Fallback to non-CORS <audio> element (e.g. if backend proxy unavailable on static hosting)
+    if (
+      source === 'cors' &&
+      isUrlOrRadio &&
+      fallbackAudioRef.current &&
+      fallbackAttemptedKeyRef.current !== trackKey
+    ) {
+      fallbackAttemptedKeyRef.current = trackKey;
+      const fallbackEl = fallbackAudioRef.current;
+      const resolvedSrc =
+        /^http:\/\//i.test(activeTrack.src) &&
+        !/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(activeTrack.src) &&
+        !/^http:\/\/[^/]+:\d+/i.test(activeTrack.src) &&
+        typeof window !== 'undefined' &&
+        window.location?.protocol === 'https:'
+          ? activeTrack.src.replace(/^http:\/\//i, 'https://')
+          : activeTrack.src;
+
+      el.pause();
+      if (el.hasAttribute('src')) {
+        el.removeAttribute('src');
+        el.load();
+      }
+
+      usingDirectAudioFallbackRef.current = true;
+      setUsingDirectAudioFallback(true);
+      fallbackEl.volume = isMuted ? 0 : volume;
+      fallbackEl.muted = isMuted;
+      fallbackEl.src = resolvedSrc;
+      fallbackEl.load();
+
+      if (playbackIntentRef.current || isPlayingRef.current) {
+        void fallbackEl
+          .play()
+          .then(() => {
+            setIsPlaying(true);
+            setAwaitingAutoplayUnlock(false);
+          })
+          .catch(() => {
+            setIsPlaying(false);
+          });
+      }
+      return;
+    }
+
+    // 3) Auto-try next mirror in M3U/PLS radio playlists before failing
+    const maxMirrorRetries = Math.min(playlistRef.current.length - 1, 5);
+    if (isUrlOrRadio && playlistRef.current.length > 1 && mirrorRetriesRef.current < maxMirrorRetries) {
+      mirrorRetriesRef.current += 1;
+      const nextIdx = (currentIndexRef.current + 1) % playlistRef.current.length;
+      void selectTrack(
+        nextIdx,
+        playbackIntentRef.current || isPlayingRef.current,
+        isRecordingRef.current
+      );
+      return;
+    }
+
+    pendingSeekRef.current = null;
+    playbackIntentRef.current = false;
+    trackEvent('stream_error', { track_title: activeTrack.title });
+    if (isRecordingRef.current) {
+      const hasLiveSession =
+        cameraOverlayActiveRef.current ||
+        customStageMediaRef.current?.kind === 'camera' ||
+        micEnabledRef.current;
+      if (hasLiveSession) {
+        showToast(t.streamErrorToast, 'error');
+        if (playlistRef.current.length > 1) {
+          const nextIdx = (currentIndexRef.current + 1) % playlistRef.current.length;
+          void selectTrack(nextIdx, true, true);
+        }
+        return;
+      }
+      setIsPlaying(false);
+      stopStudioRecording();
+      showToast(t.streamErrorToast, 'error');
+      return;
+    }
+    setIsPlaying(false);
+    showToast(t.streamErrorToast, 'error');
+  };
+
   // Auto-enter Floating Track Orbs mode after 10 seconds of inactivity while playing audio
   useEffect(() => {
     const anyModalOpen =
@@ -3265,6 +4021,12 @@ export default function App() {
     if (!pendingFolderRestore) return;
     const { folderId, folderName, trackId, trackTitle, trackIndex, currentTime: savedTime } =
       pendingFolderRestore;
+    const restoreObj: RestoreOptions = {
+      trackId,
+      trackTitle,
+      trackIndex,
+      time: savedTime,
+    };
     try {
       const dirHandle = await getDirectoryHandle(folderId);
       if (dirHandle) {
@@ -3272,12 +4034,7 @@ export default function App() {
         if (files.length > 0) {
           await loadParsedAudioFiles(files, folderId, folderName, {
             saveHandle: dirHandle,
-            restore: {
-              trackId,
-              trackTitle,
-              trackIndex,
-              time: savedTime,
-            },
+            restore: restoreObj,
             closeModal: true,
             autoPlay: true,
             toastType: 'opened',
@@ -3286,11 +4043,163 @@ export default function App() {
         }
       }
     } catch {
-      // fallback to manual folder re-selection modal below
+      // fall through to IndexedDB cached files check
     }
+
+    const cachedFiles = await getFolderFiles(folderId);
+    if (cachedFiles && cachedFiles.length > 0) {
+      await loadParsedAudioFiles(cachedFiles, folderId, folderName, {
+        persistFiles: false,
+        restore: restoreObj,
+        closeModal: true,
+        autoPlay: true,
+        toastType: 'opened',
+      });
+      return;
+    }
+
     openSources('folder');
     showToast(t.reselectFolderToast(folderName), 'info');
   }, [loadParsedAudioFiles, openSources, pendingFolderRestore, showToast, t]);
+
+  const mapAuthErrorMessage = useCallback(
+    (err: unknown): { code: string; message: string } => {
+      const code =
+        err && typeof err === 'object' && 'code' in err
+          ? String((err as { code?: unknown }).code)
+          : '';
+      if (code === 'auth/operation-not-allowed') {
+        return { code, message: cloudT.authProviderDisabledHint };
+      }
+      if (
+        code === 'auth/wrong-password' ||
+        code === 'auth/invalid-credential' ||
+        code === 'auth/user-not-found' ||
+        code === 'auth/invalid-login-credentials'
+      ) {
+        return { code, message: cloudT.authInvalidCredError };
+      }
+      if (code === 'auth/email-already-in-use') {
+        return { code, message: cloudT.authEmailInUseError };
+      }
+      if (code === 'auth/weak-password') {
+        return { code, message: cloudT.authWeakPasswordError };
+      }
+      return { code, message: cloudT.cloudAuthErrorToast };
+    },
+    [cloudT]
+  );
+
+  const handleSaveToCloud = useCallback(
+    async (tab: SourceTab, userOverride?: CloudUserInfo | null) => {
+      const user = userOverride ?? cloudUserRef.current;
+      if (!user) return;
+      setIsSavingToCloud(true);
+      try {
+        await saveCloudMediaSources(user.uid, {
+          audiusProfiles: savedProfilesRef.current,
+          activeHandle: currentHandleRef.current,
+          urlEntries: savedUrlsRef.current,
+          activeUrlId: activeUrlIdRef.current,
+          folderEntries: savedFoldersRef.current,
+        });
+        trackEvent('cloud_save_sources', { tab });
+        showToast(cloudT.cloudSavedToast, 'success');
+      } catch {
+        showToast(cloudT.cloudSyncErrorToast, 'error');
+      } finally {
+        setIsSavingToCloud(false);
+      }
+    },
+    [cloudT, showToast]
+  );
+
+  const handleSignInGoogleCloud = useCallback(
+    async (saveAfterTab?: SourceTab): Promise<boolean> => {
+      try {
+        const user = await signInWithGoogleCloud();
+        if (!user) {
+          showToast(cloudT.cloudAuthErrorToast, 'error');
+          return false;
+        }
+        cloudUserRef.current = user;
+        setCloudUser(user);
+        await syncFromCloudForUser(user.uid);
+        if (saveAfterTab) {
+          await handleSaveToCloud(saveAfterTab, user);
+        }
+        return true;
+      } catch (err) {
+        const { code, message } = mapAuthErrorMessage(err);
+        if (
+          code === 'auth/popup-closed-by-user' ||
+          code === 'auth/cancelled-popup-request'
+        ) {
+          return false;
+        }
+        showToast(message, 'error');
+        return false;
+      }
+    },
+    [cloudT, handleSaveToCloud, mapAuthErrorMessage, showToast, syncFromCloudForUser]
+  );
+
+  const handleSignInEmailCloud = useCallback(
+    async (
+      email: string,
+      password: string,
+      mode: 'signin' | 'register',
+      saveAfterTab?: SourceTab
+    ): Promise<{ ok: boolean; errorMsg?: string }> => {
+      try {
+        const user =
+          mode === 'register'
+            ? await registerWithEmailCloud(email, password)
+            : await signInWithEmailCloud(email, password);
+        if (!user) {
+          return { ok: false, errorMsg: cloudT.cloudAuthErrorToast };
+        }
+        cloudUserRef.current = user;
+        setCloudUser(user);
+
+        await syncFromCloudForUser(user.uid);
+        if (saveAfterTab) {
+          await handleSaveToCloud(saveAfterTab, user);
+        }
+        return { ok: true };
+      } catch (err) {
+        const { message } = mapAuthErrorMessage(err);
+        return { ok: false, errorMsg: message };
+      }
+    },
+    [cloudT, handleSaveToCloud, mapAuthErrorMessage, syncFromCloudForUser]
+  );
+
+  const handleResetPasswordCloud = useCallback(
+    async (email: string): Promise<{ ok: boolean; errorMsg?: string }> => {
+      try {
+        await sendPasswordResetCloud(email);
+        showToast(cloudT.authResetSentToast, 'success');
+        return { ok: true };
+      } catch (err) {
+        const { message } = mapAuthErrorMessage(err);
+        return { ok: false, errorMsg: message };
+      }
+    },
+    [cloudT, mapAuthErrorMessage, showToast]
+  );
+
+  const handleSignOutCloud = useCallback(async () => {
+    try {
+      await signOutCloud();
+      cloudUserRef.current = null;
+      cloudSyncFetchedUidRef.current = null;
+      setCloudUser(null);
+      showToast(cloudT.cloudSignedOutToast, 'info');
+    } catch {
+      showToast(cloudT.cloudSyncErrorToast, 'error');
+    }
+  }, [cloudT, showToast]);
 
   const handleInstallApp = useCallback(async () => {
     if (isInstalled) {
@@ -4471,7 +5380,7 @@ export default function App() {
       <VisualizerCanvas
         canvasRef={masterCanvasRef}
         studioFrameRef={studioFrameStateRef}
-        analyser={analyser}
+        analyser={usingDirectAudioFallback ? null : analyser}
         isPlaying={isPlaying}
         vizMode={vizMode}
         paletteIndex={paletteIndex}
@@ -5493,17 +6402,33 @@ export default function App() {
 
           {/* PLAYBACK CONTROLS & VOLUME */}
           <div className="flex items-center justify-between gap-4">
-            <div className="flex lg:hidden items-center gap-2">
+            <div className="flex items-center gap-2 relative">
+              {fmFlyout && (
+                <div
+                  key={fmFlyout.id}
+                  aria-live="polite"
+                  className="pointer-events-none absolute -top-11 left-0 z-30 whitespace-nowrap px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500/35 via-fuchsia-500/30 to-purple-500/35 border border-cyan-300/50 backdrop-blur-md text-xs font-bold tracking-wide text-white shadow-lg shadow-cyan-950/50 animate-fm-fly-dissolve"
+                >
+                  {fmFlyout.label}
+                </div>
+              )}
               <button
                 type="button"
-                onClick={() => {
-                  setIsEqOpen(true);
-                  trackEvent('modal_open', { modal: 'equalizer' });
-                }}
-                aria-label={t.eqLabel}
-                className="p-2.5 rounded-xl bg-white/5 text-purple-300 cursor-pointer"
+                onClick={() => void handleCycleFmStation()}
+                aria-label="FM"
+                className={`relative overflow-hidden h-10 px-3 rounded-xl border flex items-center justify-center cursor-pointer transition-transform active:scale-95 animate-fm-btn-glow ${
+                  currentTrack?.isRadio
+                    ? 'bg-gradient-to-tr from-cyan-500/30 via-purple-500/30 to-fuchsia-500/30 text-white'
+                    : 'bg-gradient-to-tr from-cyan-500/15 via-purple-500/20 to-fuchsia-500/20 text-cyan-100 hover:text-white'
+                }`}
               >
-                <Sliders className="w-4 h-4" />
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 w-1/2 bg-gradient-to-r from-transparent via-white/35 to-transparent animate-fm-btn-shimmer"
+                />
+                <span className="relative z-10 text-xs font-extrabold tracking-widest bg-gradient-to-r from-cyan-200 via-white to-fuchsia-200 bg-clip-text text-transparent">
+                  FM
+                </span>
               </button>
               <button
                 type="button"
@@ -5656,158 +6581,37 @@ export default function App() {
         </div>
       </footer>
 
-      {/* HIDDEN HTML5 AUDIO ELEMENT */}
+      {/* HIDDEN HTML5 AUDIO ELEMENT (CORS / WebAudio EQ + Spectrum) */}
       <audio
         ref={audioRef}
         crossOrigin="anonymous"
-        onTimeUpdate={(e) => {
-          const el = e.currentTarget;
-          setCurrentTime(el.currentTime);
-          if (Number.isFinite(el.duration) && el.duration > 0) {
-            setDuration(el.duration);
-          }
-          const now = Date.now();
-          if (now - lastTimeFlushRef.current >= 2000) {
-            lastTimeFlushRef.current = now;
-            persistCurrentSession({ currentTime: el.currentTime });
-          }
+        onPlaying={() => {
+          mirrorRetriesRef.current = 0;
+          setIsPlaying(true);
+          setAwaitingAutoplayUnlock(false);
         }}
-        onDurationChange={(e) => {
-          const el = e.currentTarget;
-          if (Number.isFinite(el.duration) && el.duration > 0) {
-            setDuration(el.duration);
-          } else if (
-            el.duration === Infinity &&
-            activeSessionRef.current?.sourceType === 'url'
-          ) {
-            const activeTrackNow = playlistRef.current[currentIndexRef.current];
-            if (
-              activeTrackNow &&
-              activeTrackNow.mediaType !== 'video' &&
-              activeTrackNow.mediaType !== 'image'
-            ) {
-              syncRadioCarouselForTrack({ ...activeTrackNow, isRadio: true });
-            }
-          }
-        }}
-        onLoadedMetadata={(e) => {
-          const el = e.currentTarget;
-          if (Number.isFinite(el.duration) && el.duration > 0) {
-            setDuration(el.duration);
-          } else if (
-            el.duration === Infinity &&
-            activeSessionRef.current?.sourceType === 'url'
-          ) {
-            const activeTrackNow = playlistRef.current[currentIndexRef.current];
-            if (
-              activeTrackNow &&
-              activeTrackNow.mediaType !== 'video' &&
-              activeTrackNow.mediaType !== 'image'
-            ) {
-              syncRadioCarouselForTrack({ ...activeTrackNow, isRadio: true });
-            }
-          }
-          const pending = pendingSeekRef.current;
-          if (
-            pending &&
-            (el.src === pending.src || el.currentSrc === pending.src || !pending.src)
-          ) {
-            pendingSeekRef.current = null;
-            const maxTarget =
-              Number.isFinite(el.duration) && el.duration > 1 ? el.duration - 0.5 : pending.time;
-            const targetTime = Math.max(0, Math.min(pending.time, maxTarget));
-            if (targetTime > 0) {
-              try {
-                el.currentTime = targetTime;
-                setCurrentTime(targetTime);
-              } catch {
-                // ignore seek failures on non-seekable streams
-              }
-            }
-          }
-        }}
-        onPause={(e) => {
-          const el = e.currentTarget;
-          if (isRecordingRef.current && isPlayingRef.current && !el.ended) {
-            window.setTimeout(() => {
-              if (isRecordingRef.current && isPlayingRef.current && el.paused && !el.ended) {
-                void el.play().catch(() => {});
-              }
-            }, 60);
-          }
-        }}
-        onEnded={(e) => {
-          const el = e.currentTarget;
-          // Guard against remote audio CDN connections truncating prematurely mid-track during recording
-          if (
-            isRecordingRef.current &&
-            Number.isFinite(el.duration) &&
-            el.duration > 10 &&
-            el.currentTime < el.duration - 2.5 &&
-            el.src
-          ) {
-            pendingSeekRef.current = { src: el.src, time: el.currentTime };
-            el.load();
-            void el.play().catch(() => {});
-            return;
-          }
+        onTimeUpdate={(e) => handleAudioTimeUpdate(e.currentTarget)}
+        onDurationChange={(e) => handleAudioDurationChange(e.currentTarget)}
+        onLoadedMetadata={(e) => handleAudioLoadedMetadata(e.currentTarget)}
+        onPause={(e) => handleAudioPause(e.currentTarget)}
+        onEnded={(e) => handleAudioEnded(e.currentTarget)}
+        onError={(e) => handleAudioStreamError('cors', e.currentTarget)}
+      />
 
-          trackEvent('track_complete', {
-            track_title: currentTrack?.title,
-            repeat: isRepeat,
-          });
-          if (isRecordingRef.current) {
-            if (isRepeat) {
-              el.currentTime = 0;
-              void el.play().catch(() => {});
-              return;
-            }
-            const hasLiveSession =
-              cameraOverlayActiveRef.current ||
-              customStageMediaRef.current?.kind === 'camera' ||
-              micEnabledRef.current;
-            if (hasLiveSession) {
-              if (playlistRef.current.length > 1) {
-                const nextIdx = (currentIndexRef.current + 1) % playlistRef.current.length;
-                void selectTrack(nextIdx, true, true);
-              }
-              return;
-            }
-            stopStudioRecording();
-            return;
-          }
-          if (isRepeat && audioRef.current) {
-            audioRef.current.currentTime = 0;
-            void audioRef.current.play();
-          } else {
-            nextTrack(true);
-          }
+      {/* FALLBACK DIRECT HTML5 AUDIO ELEMENT (for radio/URL streams rejected by CORS) */}
+      <audio
+        ref={fallbackAudioRef}
+        onPlaying={() => {
+          mirrorRetriesRef.current = 0;
+          setIsPlaying(true);
+          setAwaitingAutoplayUnlock(false);
         }}
-        onError={() => {
-          if (playlist.length === 0) return;
-          pendingSeekRef.current = null;
-          trackEvent('stream_error', { track_title: currentTrack?.title });
-          if (isRecordingRef.current) {
-            const hasLiveSession =
-              cameraOverlayActiveRef.current ||
-              customStageMediaRef.current?.kind === 'camera' ||
-              micEnabledRef.current;
-            if (hasLiveSession) {
-              showToast(t.streamErrorToast, 'error');
-              if (playlistRef.current.length > 1) {
-                const nextIdx = (currentIndexRef.current + 1) % playlistRef.current.length;
-                void selectTrack(nextIdx, true, true);
-              }
-              return;
-            }
-            setIsPlaying(false);
-            stopStudioRecording();
-            showToast(t.streamErrorToast, 'error');
-            return;
-          }
-          setIsPlaying(false);
-          showToast(t.streamErrorToast, 'error');
-        }}
+        onTimeUpdate={(e) => handleAudioTimeUpdate(e.currentTarget)}
+        onDurationChange={(e) => handleAudioDurationChange(e.currentTarget)}
+        onLoadedMetadata={(e) => handleAudioLoadedMetadata(e.currentTarget)}
+        onPause={(e) => handleAudioPause(e.currentTarget)}
+        onEnded={(e) => handleAudioEnded(e.currentTarget)}
+        onError={(e) => handleAudioStreamError('fallback', e.currentTarget)}
       />
 
       {/* UNIFIED SOURCES MODAL */}
@@ -5834,6 +6638,13 @@ export default function App() {
         onLoadUrlSource={(u) => void handleLoadUrlSource(u)}
         onSelectSavedUrl={(entry) => void handleLoadUrlSource(entry.url)}
         onConfirmDelete={handleConfirmDelete}
+        cloudUser={cloudUser}
+        isSavingToCloud={isSavingToCloud}
+        onSaveToCloud={(tab) => void handleSaveToCloud(tab)}
+        onSignInGoogleCloud={handleSignInGoogleCloud}
+        onSignInEmailCloud={handleSignInEmailCloud}
+        onResetPasswordCloud={handleResetPasswordCloud}
+        onSignOutCloud={() => void handleSignOutCloud()}
       />
 
       {/* EQUALIZER MODAL */}

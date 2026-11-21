@@ -1,5 +1,6 @@
 import {createRoot} from 'react-dom/client';
 import {registerSW} from 'virtual:pwa-register';
+import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import App from './App.tsx';
 import {I18nProvider} from './i18n/I18nContext.tsx';
 import './index.css';
@@ -35,7 +36,9 @@ registerSW({
 });
 
 createRoot(document.getElementById('root')!).render(
-  <I18nProvider>
-    <App />
-  </I18nProvider>
+  <ErrorBoundary>
+    <I18nProvider>
+      <App />
+    </I18nProvider>
+  </ErrorBoundary>
 );

@@ -1,0 +1,168 @@
+{
+  "entities": {
+    "UserCloudAccount": {
+      "title": "UserCloudAccount",
+      "description": "Root cloud workspace document for a signed-in user owning media source bookmarks.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the account owner.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the cloud workspace was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the cloud workspace was last updated."
+        }
+      },
+      "required": ["ownerId", "createdAt", "updatedAt"]
+    },
+    "AudiusProfileItem": {
+      "title": "AudiusProfileItem",
+      "description": "Saved Audius artist/profile handle synced to cloud.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "handle": {
+          "type": "string",
+          "description": "Normalized Audius profile handle without leading @.",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[a-zA-Z0-9_.\\-]+$"
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Whether this profile was active when synced."
+        },
+        "addedAt": {
+          "type": "number",
+          "description": "Client epoch milliseconds ordering timestamp."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["ownerId", "handle", "isActive", "addedAt", "createdAt", "updatedAt"]
+    },
+    "UrlSourceItem": {
+      "title": "UrlSourceItem",
+      "description": "Saved URL, radio stream, or repository music source synced to cloud.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "url": {
+          "type": "string",
+          "description": "Normalized source URL or multi-line URL playlist.",
+          "minLength": 4,
+          "maxLength": 2048,
+          "pattern": "^https?://[\\s\\S]+"
+        },
+        "label": {
+          "type": "string",
+          "description": "Display label for the URL source.",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Whether this URL source was active when synced."
+        },
+        "addedAt": {
+          "type": "number",
+          "description": "Client epoch milliseconds timestamp when added."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["ownerId", "url", "label", "isActive", "addedAt", "createdAt", "updatedAt"]
+    },
+    "FolderBookmarkItem": {
+      "title": "FolderBookmarkItem",
+      "description": "Metadata bookmark for a local device folder (actual media files & handles stay local in IndexedDB).",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the local folder or file collection.",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "trackCount": {
+          "type": "number",
+          "description": "Number of media items in the folder."
+        },
+        "addedAt": {
+          "type": "number",
+          "description": "Client epoch milliseconds timestamp when added."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["ownerId", "name", "trackCount", "addedAt", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserCloudAccount" },
+      "description": "Per-user root cloud document serving as the relational master gate for media source subcollections."
+    },
+    "/users/{userId}/audiusProfiles/{profileId}": {
+      "schema": { "$ref": "#/entities/AudiusProfileItem" },
+      "description": "User-saved Audius artist handles synced across devices."
+    },
+    "/users/{userId}/urlSources/{urlId}": {
+      "schema": { "$ref": "#/entities/UrlSourceItem" },
+      "description": "User-saved radio stream and URL repository sources synced across devices."
+    },
+    "/users/{userId}/folderBookmarks/{folderId}": {
+      "schema": { "$ref": "#/entities/FolderBookmarkItem" },
+      "description": "Lightweight metadata bookmarks of user local folders."
+    }
+  }
+}
