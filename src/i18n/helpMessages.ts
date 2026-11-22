@@ -34,10 +34,11 @@ const EN_HELP: HelpMessages = {
       id: 'sources',
       title: '1. Music, Video & Photo Sources',
       items: [
-        'Tap the album cover or Audius / Folder / URL buttons to switch music sources.',
+        'Tap the album cover or Audius / Folder / URL buttons to switch music sources, or swipe left/right on the square cover to launch the next/previous track (or next station on Radio).',
+        'Tap the shimmering FM button in the bottom bar to cycle through 12 built-in radio stations (starting with 2 national channels for your language + 10 genre streams); long-press FM to open Media Sources.',
         'Device Folder & Files support MP3, WAV, FLAC, OGG, M4A (with ID3 cover art), plus MP4/WebM/MOV videos and JPG/PNG/WebP photos.',
         'Multiple selected photos and videos play in sequence automatically (each photo stays on screen for 5 seconds). You can also drag and drop media files onto the stage.',
-        'URL supports Audius profiles, GitHub folders, Archive.org, JSON/M3U/RSS playlists, and direct MP3 streams.',
+        'URL supports 12 preloaded FM stations (2 national + 10 genre), Audius profiles, GitHub folders, Archive.org, JSON/M3U/PLS/RSS playlists, and direct audio streams.',
       ],
     },
     {
@@ -55,7 +56,7 @@ const EN_HELP: HelpMessages = {
       items: [
         'Click the cosmic background or the Eye icon to hide panels and reveal floating audio-reactive track spheres.',
         'Tap any sphere to switch tracks, or tap the active sphere to Play/Pause. Toggle Orbs and Captions in the header or menu.',
-        'Click anywhere on the background again to restore controls.',
+        'Swipe anywhere on the animation background in Floating Orbs mode to switch the visual theme without leaving Zen mode, or tap the background once to restore controls.',
       ],
     },
     {
@@ -80,9 +81,10 @@ const EN_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. Equalizer, Fullscreen & App Install',
+      title: '6. Equalizer, Cloud Sync, Fullscreen & PWA',
       items: [
-        'Open Equalizer for 5 frequency bands (60 Hz – 14 kHz) and presets (Flat, Bass Boost, Electronic, Vocal, Night).',
+        'Open Equalizer (header or Menu) for 5 frequency bands (60 Hz – 14 kHz) and presets (Flat, Bass Boost, Electronic, Vocal, Night).',
+        'Sign in with Email/Password or Google inside Media Sources to sync Audius profiles, Folders, and URLs across devices in one profile.',
         'Use Fullscreen in the top bar or Menu anytime, and install YRitmX via Install App to use it offline as a standalone PWA.',
       ],
     },
@@ -100,10 +102,11 @@ const RU_HELP: HelpMessages = {
       id: 'sources',
       title: '1. Источники музыки, фото и видео',
       items: [
-        'Нажмите на обложку трека или кнопки Audius / Папка / URL, чтобы выбрать источник.',
+        'Нажмите на обложку или кнопки Audius / Папка / URL для выбора источника, либо смахните (свайп) квадратную обложку трека или радио для переключения и запуска следующего трека/станции.',
+        'Мерцающая кнопка FM на нижней панели последовательно переключает 12 встроенных радиостанций (начиная с 2 национальных каналов для выбранного языка и 10 жанровых); долгий тап по FM открывает «Источники медиа».',
         'Папка и файлы с устройства поддерживают MP3, WAV, FLAC, OGG, M4A (с чтением обложек из ID3), а также видео (.mp4, .webm, .mov) и фото (.jpg, .png, .webp).',
         'Если прикрепить несколько фото и видео сразу, они проигрываются по очереди (каждое фото показывается 5 секунд). Файлы можно перетаскивать прямо на экран.',
-        'URL поддерживает профили Audius, папки GitHub, Archive.org, плейлисты JSON/M3U/RSS и прямые ссылки MP3.',
+        'URL включает 12 готовых FM-станций (2 национальные + 10 жанровых), поддерживает профили Audius, папки GitHub, Archive.org, плейлисты JSON/M3U/PLS/RSS и прямые радиопотоки.',
       ],
     },
     {
@@ -121,7 +124,7 @@ const RU_HELP: HelpMessages = {
       items: [
         'Нажмите на пустой фон (или кнопку «Глаз»), чтобы скрыть интерфейс и оставить только реактивные сферы треков.',
         'Тап по другой сфере переключает трек, тап по активной — ставит паузу/воспроизведение. В шапке и меню можно отдельно включать «Сферы» и «Подписи».',
-        'Повторный клик по фону возвращает панель управления.',
+        'Смахните по фону анимации в режиме летающих сфер, чтобы сменить тему визуализации прямо в Дзен-режиме; короткий клик по фону возвращает панель управления.',
       ],
     },
     {
@@ -146,9 +149,10 @@ const RU_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. Эквалайзер, Полный экран и PWA',
+      title: '6. Эквалайзер, Облако, Полный экран и PWA',
       items: [
-        '5-полосный эквалайзер (60 Гц – 14 кГц) с пресетами («Ровный», «Бас-буст», «Электроника», «Вокал», «Ночной») работает и при воспроизведении, и при записи MP4.',
+        '5-полосный эквалайзер (60 Гц – 14 кГц) доступен в шапке и меню настроек; пресеты работают как при прослушивании, так и при записи MP4.',
+        'Войдите по Email/паролю или через Google в «Источниках медиа», чтобы синхронизировать Audius, папки и URL-станции сразу для всех вкладок.',
         'Кнопка полноэкранного режима есть в шапке и меню. Плеер можно установить как отдельное приложение (PWA) для работы даже офлайн.',
       ],
     },
@@ -166,10 +170,11 @@ const UK_HELP: HelpMessages = {
       id: 'sources',
       title: '1. Джерела музики, фото та відео',
       items: [
-        'Натисніть на обкладинку треку або кнопки Audius / Тека / URL, щоб обрати джерело.',
+        'Натисніть на обкладинку або кнопки Audius / Тека / URL, або змахніть (свайп) квадратну обкладинку для запуску наступного треку чи наступної FM-станції.',
+        'Мерехтлива кнопка FM на нижній панелі послідовно перемикає 12 вбудованих радіостанцій (спочатку 2 національні канали для вашої мови та 10 жанрових); довге натискання на FM відкриває «Джерела медіа».',
         'Тека і файли з пристрою підтримують MP3, WAV, FLAC, OGG, M4A (з обкладинками ID3), а також відео (.mp4, .webm, .mov) і фото (.jpg, .png, .webp).',
         'Якщо додати кілька фото та відео одночасно, вони відтворюються по черзі (кожне фото по 5 секунд). Файли можна перетягувати на екран.',
-        'URL підтримує профілі Audius, теки GitHub, Archive.org, списки JSON/M3U/RSS та прямі посилання MP3.',
+        'URL містить 12 готових FM-станцій (2 національні + 10 жанрових), підтримує Audius, теки GitHub, Archive.org, списки JSON/M3U/PLS/RSS та прямі радіопотоки.',
       ],
     },
     {
@@ -187,7 +192,7 @@ const UK_HELP: HelpMessages = {
       items: [
         'Натисніть на фон (або кнопку «Око»), щоб приховати інтерфейс і залишити лише реактивні сфери треків.',
         'Тап по іншій сфері перемикає трек, по активній — пауза/відтворення. «Сфери» та «Підписи» перемикаються окремо.',
-        'Повторний клік по фону повертає елементи керування.',
+        'Змахніть по фону анімації в режимі летючих сфер, щоб змінити тему візуалізації; короткий клік по фону повертає елементи керування.',
       ],
     },
     {
@@ -212,9 +217,10 @@ const UK_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. Еквалайзер, Повний екран і PWA',
+      title: '6. Еквалайзер, Хмара, Повний екран і PWA',
       items: [
-        '5-смуговий еквалайзер (60 Гц – 14 кГц) із пресетами працює і під час прослуховування, і під час експорту MP4.',
+        '5-смуговий еквалайзер (60 Гц – 14 кГц) доступний у шапці та меню; пресети працюють під час прослуховування й експорту MP4.',
+        'Увійдіть через Email/пароль або Google у «Джерелах медіа» для синхронізації Audius, тек і URL-станцій на всіх пристроях.',
         'Повноекранний режим доступний у шапці та меню; плеєр можна встановити як окремий PWA-додаток.',
       ],
     },
@@ -232,10 +238,11 @@ const ES_HELP: HelpMessages = {
       id: 'sources',
       title: '1. Fuentes de música, fotos y vídeos',
       items: [
-        'Toca la carátula o Audius / Carpeta / URL para elegir tu fuente.',
+        'Toca la carátula o Audius / Carpeta / URL, o desliza sobre la carátula cuadrada para iniciar la siguiente pista o estación FM.',
+        'El botón brillante FM de la barra inferior cambia entre 12 emisoras integradas (2 nacionales según tu idioma + 10 por género); mantén pulsado FM para abrir Fuentes multimedia.',
         'Las carpetas y archivos locales admiten MP3, WAV, FLAC, OGG, M4A (con carátulas ID3), además de vídeos (.mp4, .webm, .mov) y fotos (.jpg, .png, .webp).',
         'Si seleccionas varias fotos y vídeos, se reproducen en secuencia (cada foto dura 5 s). También puedes arrastrar archivos al escenario.',
-        'URL admite perfiles Audius, repositorios GitHub, Archive.org, listas JSON/M3U/RSS y enlaces MP3 directos.',
+        'URL incluye 12 emisoras FM preconfiguradas (2 nacionales + 10 por género) y admite Audius, GitHub, Archive.org, listas JSON/M3U/PLS/RSS y transmisiones en vivo.',
       ],
     },
     {
@@ -253,7 +260,7 @@ const ES_HELP: HelpMessages = {
       items: [
         'Toca el fondo (o el icono del Ojo) para ocultar los controles y ver solo las esferas reactivas.',
         'Toca otra esfera para cambiar de pista o la esfera activa para pausar/reproducir. Activa Esferas y Títulos por separado.',
-        'Vuelve a tocar el fondo para restaurar la interfaz.',
+        'Desliza sobre el fondo animado en modo de esferas flotantes para cambiar el tema visual; un toque corto en el fondo restaura la interfaz.',
       ],
     },
     {
@@ -278,9 +285,10 @@ const ES_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. Ecualizador, Pantalla completa e Instalación',
+      title: '6. Ecualizador, Nube, Pantalla completa y PWA',
       items: [
-        'Ecualizador de 5 bandas (60 Hz – 14 kHz) con preajustes integrado en reproducción y exportación MP4.',
+        'Ecualizador de 5 bandas (60 Hz – 14 kHz) disponible en el encabezado o menú, activo en reproducción y exportación MP4.',
+        'Inicia sesión con Email/contraseña o Google en Fuentes para sincronizar Audius, carpetas y URLs en todos tus dispositivos.',
         'Activa Pantalla completa desde el encabezado/menú o instala YRitmX como aplicación PWA.',
       ],
     },
@@ -298,10 +306,11 @@ const FR_HELP: HelpMessages = {
       id: 'sources',
       title: '1. Sources audio, photos et vidéos',
       items: [
-        'Touchez la pochette ou Audius / Dossier / URL pour charger vos médias.',
+        'Touchez la pochette ou Audius / Dossier / URL, ou balayez la pochette carrée pour lancer la piste suivante ou la station radio suivante.',
+        'Le bouton scintillant FM en bas enchaîne 12 stations radio intégrées (2 nationales selon la langue + 10 par genre) ; un appui long sur FM ouvre les Sources média.',
         'Les dossiers locaux lisent MP3, WAV, FLAC, OGG, M4A (avec pochettes ID3), ainsi que les vidéos (.mp4, .webm, .mov) et photos (.jpg, .png, .webp).',
         'Plusieurs photos/vidéos s’enchaînent automatiquement (5 s par photo). Glissez-déposez aussi vos fichiers sur l’écran.',
-        'URL prend en charge Audius, GitHub, Archive.org, playlists JSON/M3U/RSS et flux MP3 directs.',
+        'URL inclut 12 radios FM intégrées (2 nationales + 10 par genre) et prend en charge Audius, GitHub, Archive.org, playlists JSON/M3U/PLS/RSS et flux directs.',
       ],
     },
     {
@@ -319,7 +328,7 @@ const FR_HELP: HelpMessages = {
       items: [
         'Touchez l’arrière-plan (ou l’icône Œil) pour masquer les contrôles et afficher les sphères musicales réactives.',
         'Touchez une sphère pour changer de piste ou la sphère active pour Play/Pause. Réglez Sphères et Titres dans l’en-tête ou le menu.',
-        'Touchez de nouveau le fond pour réafficher l’interface.',
+        'Balayez le fond animé en mode sphères flottantes pour changer le thème visuel ; un appui court sur le fond réaffiche l’interface.',
       ],
     },
     {
@@ -344,9 +353,10 @@ const FR_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. Égaliseur, Plein écran et PWA',
+      title: '6. Égaliseur, Cloud, Plein écran et PWA',
       items: [
-        'Égaliseur 5 bandes (60 Hz – 14 kHz) avec préréglages actif en lecture et en export MP4.',
+        'Égaliseur 5 bandes (60 Hz – 14 kHz) dans l’en-tête ou le menu, actif en lecture et en export MP4.',
+        'Connectez-vous par Email/mot de passe ou Google dans Sources pour synchroniser Audius, dossiers et URL sur tous vos appareils.',
         'Mode Plein écran disponible dans la barre supérieure/menu, et installation PWA pour l’usage hors ligne.',
       ],
     },
@@ -364,10 +374,11 @@ const DE_HELP: HelpMessages = {
       id: 'sources',
       title: '1. Musik-, Video- & Fotoquellen',
       items: [
-        'Tippe auf das Cover oder Audius / Ordner / URL, um eine Quelle zu laden.',
+        'Tippe auf das Cover oder Audius / Ordner / URL, oder wische über das quadratische Cover zum Starten des nächsten Tracks bzw. Radiosenders.',
+        'Die schimmernde FM-Taste schaltet 12 integrierte Radiosender durch (zuerst 2 nationale Sender für deine Sprache + 10 Genre-Streams); langes Drücken auf FM öffnet die Medienquellen.',
         'Lokale Ordner unterstützen MP3, WAV, FLAC, OGG, M4A (inkl. ID3-Covern) sowie Videos (.mp4, .webm, .mov) und Fotos (.jpg, .png, .webp).',
         'Mehrere Fotos & Videos laufen nacheinander (Fotos je 5 Sek.). Dateien lassen sich auch direkt auf die Bühne ziehen.',
-        'URL unterstützt Audius, GitHub-Ordner, Archive.org, JSON/M3U/RSS und direkte MP3-Streams.',
+        'URL enthält 12 FM-Radiosender (2 nationale + 10 Genre-Sender) und unterstützt Audius, GitHub, Archive.org, JSON/M3U/PLS/RSS sowie direkte Streams.',
       ],
     },
     {
@@ -385,7 +396,7 @@ const DE_HELP: HelpMessages = {
       items: [
         'Tippe auf den Hintergrund (oder das Augensymbol), um die Oberfläche auszublenden und reaktive Track-Sphären anzuzeigen.',
         'Tippe auf eine Sphäre für Trackwechsel oder Play/Pause. Sphären & Titel lassen sich separat umschalten.',
-        'Erneutes Tippen auf den Hintergrund zeigt die Steuerung wieder an.',
+        'Wische im Sphären-Modus über den animierten Hintergrund, um das Visual-Theme zu wechseln; kurzes Tippen bringt die Steuerung zurück.',
       ],
     },
     {
@@ -410,9 +421,10 @@ const DE_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. Equalizer, Vollbild & PWA',
+      title: '6. Equalizer, Cloud-Sync, Vollbild & PWA',
       items: [
-        '5-Band-Equalizer (60 Hz – 14 kHz) mit Presets für Wiedergabe und MP4-Export.',
+        '5-Band-Equalizer (60 Hz – 14 kHz) in Kopfzeile/Menü für Wiedergabe und MP4-Export.',
+        'Melde dich in den Quellen per E-Mail/Passwort oder Google an, um Audius, Ordner und URLs geräteübergreifend zu synchronisieren.',
         'Vollbild über Kopfzeile/Menü steuerbar; als eigenständige PWA offline installierbar.',
       ],
     },
@@ -430,10 +442,11 @@ const IT_HELP: HelpMessages = {
       id: 'sources',
       title: '1. Sorgenti musica, foto e video',
       items: [
-        'Tocca la copertina o Audius / Cartella / URL per scegliere la sorgente.',
+        'Tocca la copertina o Audius / Cartella / URL, oppure scorri sulla copertina quadrata per avviare il brano o la stazione FM successiva.',
+        'Il pulsante scintillante FM alterna 12 stazioni radio integrate (prima 2 nazionali per la tua lingua + 10 di genere); una pressione prolungata su FM apre le Sorgenti multimediali.',
         'Le cartelle locali leggono MP3, WAV, FLAC, OGG, M4A (con copertine ID3), più video (.mp4, .webm, .mov) e foto (.jpg, .png, .webp).',
         'Più foto e video vengono riprodotti in sequenza (5 s per foto); supportato anche il drag & drop.',
-        'URL supporta Audius, cartelle GitHub, Archive.org, playlist JSON/M3U/RSS e MP3 diretti.',
+        'URL include 12 radio FM predefinite (2 nazionali + 10 di genere) e supporta Audius, GitHub, Archive.org, JSON/M3U/PLS/RSS e stream diretti.',
       ],
     },
     {
@@ -451,7 +464,7 @@ const IT_HELP: HelpMessages = {
       items: [
         'Tocca lo sfondo (o l’icona Occhio) per nascondere i controlli e mostrare le sfere reattive.',
         'Tocca una sfera per cambiare brano o la sfera attiva per Play/Pausa. Sfere e Titoli sono attivabili separatamente.',
-        'Tocca di nuovo lo sfondo per ripristinare i comandi.',
+        'Scorri sullo sfondo animato in modalità sfere fluttuanti per cambiare tema visivo; un tocco breve ripristina i comandi.',
       ],
     },
     {
@@ -476,9 +489,10 @@ const IT_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. Equalizzatore, Schermo intero e PWA',
+      title: '6. Equalizzatore, Cloud, Schermo intero e PWA',
       items: [
-        'Equalizzatore a 5 bande (60 Hz – 14 kHz) con preset attivo anche durante l’esportazione MP4.',
+        'Equalizzatore a 5 bande (60 Hz – 14 kHz) accessibile dall’intestazione o dal menu, attivo anche nell’esportazione MP4.',
+        'Accedi con Email/Password o Google in Sorgenti per sincronizzare Audius, cartelle e URL su più dispositivi.',
         'Schermo intero disponibile nell’intestazione o nel menu; installabile come app PWA.',
       ],
     },
@@ -496,10 +510,11 @@ const PT_HELP: HelpMessages = {
       id: 'sources',
       title: '1. Fontes de música, fotos e vídeos',
       items: [
-        'Toque na capa ou em Audius / Pasta / URL para escolher sua mídia.',
+        'Toque na capa ou em Audius / Pasta / URL, ou deslize na capa quadrada para iniciar a próxima faixa ou estação FM.',
+        'O botão brilhante FM alterna entre 12 rádios integradas (2 nacionais do seu idioma primeiro + 10 por gênero); pressione e segure FM para abrir Fontes de mídia.',
         'Pastas locais reproduzem MP3, WAV, FLAC, OGG, M4A (com capas ID3), além de vídeos (.mp4, .webm, .mov) e fotos (.jpg, .png, .webp).',
         'Várias fotos e vídeos tocam em sequência (5 s por foto). Você também pode arrastar arquivos para a tela.',
-        'URL aceita perfis Audius, pastas GitHub, Archive.org, listas JSON/M3U/RSS e MP3 direto.',
+        'URL inclui 12 rádios FM prontas (2 nacionais + 10 por gênero) e aceita Audius, GitHub, Archive.org, listas JSON/M3U/PLS/RSS e streams diretos.',
       ],
     },
     {
@@ -517,7 +532,7 @@ const PT_HELP: HelpMessages = {
       items: [
         'Toque no fundo (ou ícone do Olho) para ocultar os painéis e mostrar as esferas reativas das faixas.',
         'Toque em uma esfera para trocar de música ou na esfera ativa para Play/Pausa. Controle Esferas e Títulos separadamente.',
-        'Toque no fundo novamente para restaurar a interface.',
+        'Deslize pelo fundo animado no modo de esferas flutuantes para trocar o tema visual; um toque curto no fundo restaura a interface.',
       ],
     },
     {
@@ -542,9 +557,10 @@ const PT_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. Equalizador, Tela cheia e PWA',
+      title: '6. Equalizador, Nuvem, Tela cheia e PWA',
       items: [
-        'Equalizador de 5 bandas (60 Hz – 14 kHz) com presets aplicado na reprodução e no MP4.',
+        'Equalizador de 5 bandas (60 Hz – 14 kHz) no topo ou menu, aplicado na reprodução e no MP4.',
+        'Entre com E-mail/senha ou Google em Fontes para sincronizar Audius, pastas e URLs entre dispositivos.',
         'Tela cheia disponível no topo ou menu; instale como app PWA para uso offline.',
       ],
     },
@@ -562,10 +578,11 @@ const ZH_HELP: HelpMessages = {
       id: 'sources',
       title: '1. 音乐、视频与照片来源',
       items: [
-        '点击专辑封面或 Audius / 文件夹 / URL 按钮加载媒体。',
+        '点击专辑封面或 Audius / 文件夹 / URL 按钮加载媒体；在方形封面上左右滑动可立即切换并播放下一首曲目或下一电台。',
+        '点击底部栏闪烁的 FM 按钮可依次切换 12 个内置广播电台（优先播放当前语言的 2 个本国电台 + 10 个流派电台）；长按 FM 按钮可快速打开“媒体源”窗口。',
         '本地文件夹支持 MP3、WAV、FLAC、OGG、M4A（含 ID3 封面），以及视频（.mp4/.webm/.mov）和照片（.jpg/.png/.webp）。',
         '同时选择多张照片和视频时会按顺序自动播放（每张照片显示 5 秒），也支持直接拖放文件到舞台。',
-        'URL 支持 Audius 主页、GitHub 目录、Archive.org、JSON/M3U/RSS 列表及直链 MP3。',
+        'URL 内置 12 个 FM 电台（2 个本国电台 + 10 个流派）并支持 Audius、GitHub 目录、Archive.org、JSON/M3U/PLS/RSS 列表及直链流媒体。',
       ],
     },
     {
@@ -583,7 +600,7 @@ const ZH_HELP: HelpMessages = {
       items: [
         '点击空白背景（或眼睛图标）可隐藏面板，仅展示随节奏律动的悬浮曲目球体。',
         '点击其他球体切换歌曲，点击当前球体播放/暂停；顶部和菜单中可独立开关“球体”和“弧形标题”。',
-        '再次点击背景即可恢复全部控制栏。',
+        '在悬浮球体模式下滑动动画背景即可直接切换视觉主题；轻点一次背景恢复全部控制栏。',
       ],
     },
     {
@@ -608,9 +625,10 @@ const ZH_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. 均衡器、全屏与安装应用',
+      title: '6. 均衡器、云同步、全屏与 PWA',
       items: [
-        '内置 5 段均衡器（60 Hz – 14 kHz）及多套预设，听歌和导出 MP4 均实时生效。',
+        '在顶部或菜单中打开 5 段均衡器（60 Hz – 14 kHz），听歌与导出 MP4 均实时生效。',
+        '在媒体源窗口使用邮箱/密码或 Google 登录后，可将 Audius、文件夹与 URL 收藏一键同步至云端。',
         '可通过顶部或菜单切换全屏，或安装为 PWA 独立应用支持离线播放。',
       ],
     },
@@ -628,10 +646,11 @@ const JA_HELP: HelpMessages = {
       id: 'sources',
       title: '1. 音楽・動画・写真の読み込み',
       items: [
-        'アルバムジャケットや Audius / フォルダ / URL ボタンからソースを開けます。',
+        'ジャケットや Audius / フォルダ / URL から読み込み、正方形ジャケットをスワイプすると次の曲や次のFM局をすぐ再生できます。',
+        '下部バーの輝く FM ボタンで12局の内蔵ラジオ（選択言語の国別2局＋ジャンル10局）を順番に切替。FM を長押しするとメディアソースをすぐ開けます。',
         'ローカルフォルダは MP3, WAV, FLAC, OGG, M4A（ID3アートワーク対応）、動画（.mp4/.webm/.mov）、写真（.jpg/.png/.webp）に対応しています。',
         '複数の写真や動画を選ぶと順番に自動再生されます（写真は各5秒）。画面へのドラッグ＆ドロップも可能です。',
-        'URL は Audius、GitHubフォルダ、Archive.org、JSON/M3U/RSS、直リンクMP3に対応しています。',
+        'URL には12局のFMプリセット（国別2局＋ジャンル10局）があり、Audius、GitHub、Archive.org、JSON/M3U/PLS/RSS、直接ストリームに対応しています。',
       ],
     },
     {
@@ -649,7 +668,7 @@ const JA_HELP: HelpMessages = {
       items: [
         '背景（または目のアイコン）をタップすると UI が消え、音楽に反応する球体だけが表示されます。',
         '他の球体タップで曲切替、再生中の球体タップで一時停止/再生。「球体」と「曲名」は個別に切替可能です。',
-        'もう一度背景をタップすると操作パネルに戻ります。',
+        '浮遊球体モード中にアニメーション背景をスワイプするとテーマが切り替わります。背景を1回タップすると操作パネルに戻ります。',
       ],
     },
     {
@@ -674,9 +693,10 @@ const JA_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. イコライザー・全画面・PWA',
+      title: '6. イコライザー・クラウド同期・全画面・PWA',
       items: [
-        '5バンドイコライザー（60Hz〜14kHz）とプリセットが再生とMP4出力の両方に反映されます。',
+        '上部またはメニューの5バンドイコライザー（60Hz〜14kHz）は再生とMP4出力の両方に反映されます。',
+        'ソース画面でメール/パスワードまたは Google でログインすると、Audius・フォルダ・URLを端末間で同期できます。',
         '上部またはメニューから全画面切替や、オフライン対応アプリ（PWA）のインストールが可能です。',
       ],
     },
@@ -694,10 +714,11 @@ const KO_HELP: HelpMessages = {
       id: 'sources',
       title: '1. 음악, 사진 및 동영상 소스',
       items: [
-        '앨범 커버 또는 Audius / 폴더 / URL 버튼을 눌러 소스를 선택하세요.',
+        '앨범 커버 또는 Audius / 폴더 / URL로 소스를 열거나, 정사각형 커버를 스와이프하여 다음 트랙 또는 다음 FM 방송을 바로 재생하세요.',
+        '하단의 반짝이는 FM 버튼으로 12개 내장 라디오(선택한 언어의 국가별 2개 채널 + 10개 장르)를 순서대로 전환하고, 길게 누르면 미디어 소스 창이 바로 열립니다.',
         '로컬 폴더/파일은 MP3, WAV, FLAC, OGG, M4A(ID3 커버 포함)와 동영상(.mp4, .webm, .mov), 사진(.jpg, .png, .webp)을 지원합니다.',
         '여러 사진과 동영상을 선택하면 순서대로 재생됩니다(사진은 각 5초). 화면에 파일을 드래그 앤 드롭할 수도 있습니다.',
-        'URL은 Audius 프로필, GitHub 폴더, Archive.org, JSON/M3U/RSS 및 직접 MP3 링크를 지원합니다.',
+        'URL은 기본 12개 FM 채널(국가별 2개 + 장르 10개)과 Audius, GitHub, Archive.org, JSON/M3U/PLS/RSS 및 직접 스트림을 지원합니다.',
       ],
     },
     {
@@ -715,7 +736,7 @@ const KO_HELP: HelpMessages = {
       items: [
         '빈 배경(또는 눈 아이콘)을 누르면 UI가 숨겨지고 비트에 반응하는 트랙 구체만 표시됩니다.',
         '다른 구체를 누르면 트랙 전환, 재생 중 구체를 누르면 재생/일시정지됩니다. 구체와 제목 표시는 따로 켤 수 있습니다.',
-        '배경을 다시 누르면 조작 패널이 돌아옵니다.',
+        '떠다니는 구체 모드에서 애니메이션 배경을 스와이프하면 시각화 테마가 바뀝니다. 배경을 짧게 탭하면 조작 패널이 돌아옵니다.',
       ],
     },
     {
@@ -740,9 +761,10 @@ const KO_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. 이퀄라이저, 전체 화면 & PWA',
+      title: '6. 이퀄라이저, 클라우드, 전체 화면 & PWA',
       items: [
-        '5밴드 이퀄라이저(60Hz~14kHz)와 프리셋이 감상과 MP4 내보내기에 모두 적용됩니다.',
+        '상단 또는 메뉴의 5밴드 이퀄라이저(60Hz~14kHz)가 감상과 MP4 내보내기에 모두 적용됩니다.',
+        '소스 창에서 이메일/비밀번호 또는 Google로 로그인해 Audius, 폴더, URL 목록을 기기 간 동기화하세요.',
         '상단 또는 메뉴에서 전체 화면을 전환하거나 오프라인 지원 앱(PWA)으로 설치할 수 있습니다.',
       ],
     },
@@ -760,10 +782,11 @@ const TR_HELP: HelpMessages = {
       id: 'sources',
       title: '1. Müzik, Fotoğraf ve Video Kaynakları',
       items: [
-        'Kaynak seçmek için albüm kapağına veya Audius / Klasör / URL düğmelerine dokunun.',
+        'Kaynak seçmek için kapağa veya Audius / Klasör / URL’ye dokunun ya da kare kapağı kaydırarak sonraki parçayı veya FM istasyonunu başlatın.',
+        'Alt çubuktaki parlayan FM düğmesi 12 dahili radyo istasyonu arasında geçer (dilinize özel 2 ulusal kanal ilk sırada + 10 tür kanalı); FM düğmesine basılı tutmak Medya Kaynaklarını açar.',
         'Cihaz klasörleri MP3, WAV, FLAC, OGG, M4A (ID3 kapaklı) ile video (.mp4, .webm, .mov) ve fotoğrafları (.jpg, .png, .webp) destekler.',
         'Birden fazla fotoğraf ve video seçilirse sırayla oynatılır (her fotoğraf 5 sn kalır). Dosyaları sahneye sürükleyip bırakabilirsiniz.',
-        'URL ile Audius profilleri, GitHub klasörleri, Archive.org, JSON/M3U/RSS ve doğrudan MP3 çalınabilir.',
+        'URL bölümünde 12 hazır FM kanalı (2 ulusal + 10 tür) ile Audius, GitHub, Archive.org, JSON/M3U/PLS/RSS ve doğrudan radyo akışları desteklenir.',
       ],
     },
     {
@@ -781,7 +804,7 @@ const TR_HELP: HelpMessages = {
       items: [
         'Arayüzü gizleyip yalnızca müziğe tepki veren küreleri görmek için arka plana (veya Göz simgesine) dokunun.',
         'Başka küreye dokunarak parça değiştirin, aktif küreye dokunarak duraklatın/oynatın. Küreler ve Başlıklar ayrı açılıp kapanır.',
-        'Kontrolleri geri getirmek için tekrar arka plana dokunun.',
+        'Yüzen küreler modunda animasyon arka planını kaydırarak görsel temayı değiştirin; kısa dokunuş kontrolleri geri getirir.',
       ],
     },
     {
@@ -806,9 +829,10 @@ const TR_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. Ekolayzer, Tam Ekran ve PWA',
+      title: '6. Ekolayzer, Bulut, Tam Ekran ve PWA',
       items: [
-        '5 bantlı ekolayzer (60 Hz – 14 kHz) ve hazır ayarlar hem dinlemede hem MP4 aktarımında çalışır.',
+        'Üst çubuk veya menüdeki 5 bantlı ekolayzer (60 Hz – 14 kHz) hem dinlemede hem MP4 aktarımında çalışır.',
+        'Kaynaklar penceresinde E-posta/Şifre veya Google ile giriş yaparak Audius, klasör ve URL listelerinizi cihazlar arasında eşitleyin.',
         'Üst çubuktan Tam Ekran açabilir veya uygulamayı çevrimdışı PWA olarak yükleyebilirsiniz.',
       ],
     },
@@ -826,10 +850,11 @@ const PL_HELP: HelpMessages = {
       id: 'sources',
       title: '1. Źródła muzyki, zdjęć i wideo',
       items: [
-        'Kliknij okładkę lub przyciski Audius / Folder / URL, aby wybrać źródło.',
+        'Kliknij okładkę lub Audius / Folder / URL albo przesuń palcem po kwadratowej okładce, aby włączyć kolejny utwór lub stację FM.',
+        'Połyskujący przycisk FM przełącza kolejno 12 wbudowanych stacji radiowych (najpierw 2 krajowe dla wybranego języka + 10 gatunkowych); długie przytrzymanie FM otwiera Źródła mediów.',
         'Lokalne foldery obsługują MP3, WAV, FLAC, OGG, M4A (z okładkami ID3) oraz wideo (.mp4, .webm, .mov) i zdjęcia (.jpg, .png, .webp).',
         'Wiele wybranych zdjęć i filmów odtwarza się po kolei (każde zdjęcie przez 5 s). Pliki można też przeciągnąć na scenę.',
-        'URL obsługuje profile Audius, foldery GitHub, Archive.org, listy JSON/M3U/RSS i bezpośrednie MP3.',
+        'URL zawiera 12 gotowych stacji FM (2 krajowe + 10 gatunkowych) oraz obsługuje Audius, GitHub, Archive.org, listy JSON/M3U/PLS/RSS i bezpośrednie strumienie.',
       ],
     },
     {
@@ -847,7 +872,7 @@ const PL_HELP: HelpMessages = {
       items: [
         'Kliknij tło (lub ikonę Oka), aby ukryć panel i zostawić tylko reaktywne sfery utworów.',
         'Kliknij inną sferę by zmienić utwór, a aktywną by włączyć Play/Pauzę. Sfery i Podpisy przełączysz osobno.',
-        'Ponowne kliknięcie tła przywraca interfejs.',
+        'Przesuń po animowanym tle w trybie latających sfer, aby zmienić motyw wizualny; krótkie kliknięcie przywraca interfejs.',
       ],
     },
     {
@@ -872,9 +897,10 @@ const PL_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. Korektor, Pełny ekran i PWA',
+      title: '6. Korektor, Chmura, Pełny ekran i PWA',
       items: [
-        '5-pasmowy korektor (60 Hz – 14 kHz) z presetami działa podczas słuchania i eksportu MP4.',
+        '5-pasmowy korektor (60 Hz – 14 kHz) dostępny w nagłówku lub menu działa podczas słuchania i eksportu MP4.',
+        'Zaloguj się przez Email/Hasło lub Google w Źródłach, aby zsynchronizować Audius, foldery i URL między urządzeniami.',
         'Przełączaj Pełny ekran lub zainstaluj YRitmX jako aplikację PWA offline.',
       ],
     },
@@ -892,10 +918,11 @@ const AR_HELP: HelpMessages = {
       id: 'sources',
       title: '1. مصادر الموسيقى والصور والفيديو',
       items: [
-        'انقر على غلاف المقطع أو أزرار Audius / مجلد / رابط لاختيار المصدر.',
+        'انقر على الغلاف أو أزرار Audius / مجلد / رابط، أو اسحب على الغلاف المربع لتشغيل المقطع التالي أو محطة الراديو التالية.',
+        'زر FM المتوهج في الشريط السفلي يبدّل بين 12 محطة إذاعية مدمجة (محطتان وطنيتان للغتك أولاً + 10 محطات حسب النوع)؛ والضغط المطوّل على FM يفتح نافذة مصادر الوسائط.',
         'تدعم مجلدات الجهاز ملفات MP3 وWAV وFLAC وOGG وM4A (مع أغلفة ID3)، بالإضافة إلى الفيديو (.mp4/.webm/.mov) والصور (.jpg/.png/.webp).',
         'عند اختيار عدة صور ومقاطع فيديو تُعرض بالتتابع (5 ثوانٍ لكل صورة)، كما يمكنك سحب الملفات وإفلاتها على المسرح.',
-        'يدعم الرابط ملفات Audius ومجلدات GitHub وArchive.org وقوائم JSON/M3U/RSS وروابط MP3 المباشرة.',
+        'يتضمن تبويب الرابط 12 محطة FM جاهزة (محطتان وطنيتان + 10 حسب النوع) ويدعم Audius وGitHub وArchive.org وقوائم JSON/M3U/PLS/RSS والبث المباشر.',
       ],
     },
     {
@@ -913,7 +940,7 @@ const AR_HELP: HelpMessages = {
       items: [
         'انقر على الخلفية الفارغة (أو أيقونة العين) لإخفاء الأزرار وإظهار كرات المقاطع المتفاعلة مع الإيقاع.',
         'انقر على أي كرة لتبديل المقطع أو الكرة النشطة للإيقاف/التشغيل. يمكن التحكم في الكرات والعناوين بشكل منفصل.',
-        'انقر على الخلفية مرة أخرى لإعادة عناصر التحكم.',
+        'اسحب على الخلفية المتحركة في وضع الكرات العائمة لتغيير نمط المؤثر البصري؛ ونقرة قصيرة على الخلفية تعيد عناصر التحكم.',
       ],
     },
     {
@@ -938,9 +965,10 @@ const AR_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. المعادل وملء الشاشة والتثبيت',
+      title: '6. المعادل والسحابة وملء الشاشة وPWA',
       items: [
-        'معادل صوت خماسي النطاقات (60 هرتز – 14 كيلوهرتز) مع إعدادات جاهزة يعمل أثناء الاستماع والتصدير.',
+        'معادل الصوت خماسي النطاقات (60 هرتز – 14 كيلوهرتز) متاح في الشريط العلوي أو القائمة ويعمل أثناء الاستماع والتصدير.',
+        'سجّل الدخول بالبريد/كلمة المرور أو Google من مصادر الوسائط لمزامنة Audius والمجلدات والروابط عبر أجهزتك.',
         'يمكنك تفعيل ملء الشاشة أو تثبيت YRitmX كتطبيق PWA للعمل دون إنترنت.',
       ],
     },
@@ -958,10 +986,11 @@ const HI_HELP: HelpMessages = {
       id: 'sources',
       title: '1. संगीत, फ़ोटो और वीडियो स्रोत',
       items: [
-        'स्रोत चुनने के लिए एल्बम कवर या Audius / फ़ोल्डर / URL बटन पर टैप करें।',
+        'स्रोत चुनने के लिए कवर या Audius / फ़ोल्डर / URL पर टैप करें, या चौकोर कवर पर स्वाइप करके अगला ट्रैक या अगला FM स्टेशन चलाएँ।',
+        'निचले बार में चमकता FM बटन 12 इनबिल्ट रेडियो स्टेशन (पहले आपकी भाषा के 2 राष्ट्रीय चैनल + 10 जॉनर चैनल) क्रम से बदलता है; FM को दबाए रखने पर मीडिया स्रोत तुरंत खुलता है।',
         'डिवाइस फ़ोल्डर MP3, WAV, FLAC, OGG, M4A (ID3 कवर सहित) तथा वीडियो (.mp4/.webm/.mov) और फ़ोटो (.jpg/.png/.webp) सपोर्ट करते हैं।',
         'कई फ़ोटो और वीडियो चुनने पर वे क्रम से चलते हैं (हर फ़ोटो 5 सेकंड)। फ़ाइलें सीधे स्टेज पर ड्रैग-ड्रॉप कर सकते हैं।',
-        'URL में Audius प्रोफ़ाइल, GitHub फ़ोल्डर, Archive.org, JSON/M3U/RSS प्लेलिस्ट और डायरेक्ट MP3 चलते हैं।',
+        'URL टैब में 12 रेडी FM स्टेशन (2 राष्ट्रीय + 10 जॉनर) पहले से शामिल हैं तथा Audius, GitHub, Archive.org, JSON/M3U/PLS/RSS व लाइव स्ट्रीम चलते हैं।',
       ],
     },
     {
@@ -979,7 +1008,7 @@ const HI_HELP: HelpMessages = {
       items: [
         'इंटरफ़ेस छिपाने और केवल बीट पर थिरकते ट्रैक गोले देखने के लिए खाली पृष्ठभूमि (या आँख आइकन) पर टैप करें।',
         'दूसरे गोले पर टैप से ट्रैक बदलें, सक्रिय गोले पर प्ले/पॉज़ करें। गोले और शीर्षक अलग से ऑन/ऑफ होते हैं।',
-        'पृष्ठभूमि पर दोबारा क्लिक करने से नियंत्रण वापस आ जाते हैं।',
+        'तैरते गोलों वाले मोड में एनीमेशन पृष्ठभूमि पर स्वाइप करके विज़ुअल थीम बदलें; एक छोटे टैप से नियंत्रण वापस आते हैं।',
       ],
     },
     {
@@ -1004,9 +1033,10 @@ const HI_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. इक्वलाइज़र, फुलस्क्रीन और PWA',
+      title: '6. इक्वलाइज़र, क्लाउड, फुलस्क्रीन और PWA',
       items: [
-        '5-बैंड इक्वलाइज़र (60 Hz – 14 kHz) और प्रीसेट सुनने तथा MP4 एक्सपोर्ट दोनों में काम करते हैं।',
+        'हेडर या मेनू में उपलब्ध 5-बैंड इक्वलाइज़र (60 Hz – 14 kHz) सुनने और MP4 एक्सपोर्ट दोनों में काम करता है।',
+        'Audius, फ़ोल्डर और URL स्रोतों को डिवाइसों पर सिंक करने के लिए ईमेल/पासवर्ड या Google से साइन इन करें।',
         'ऊपरी बार या मेनू से फुलस्क्रीन चलाएँ या ऑफ़लाइन PWA ऐप इंस्टॉल करें।',
       ],
     },
@@ -1024,10 +1054,11 @@ const UZ_HELP: HelpMessages = {
       id: 'sources',
       title: '1. Musiqa, rasm va video manbalari',
       items: [
-        'Manba tanlash uchun trek muqovasini yoki Audius / Papka / URL tugmalarini bosing.',
+        'Manba tanlash uchun muqova yoki Audius / Papka / URL tugmalarini bosing, yoxud kvadrat muqovani surib (svayp) keyingi trek yoki FM stansiyani ishga tushiring.',
+        'Pastki paneldagi jilvali FM tugmasi 12 ta o‘rnatilgan radiostansiyani (avval tilingizdagi 2 ta milliy kanal + 10 ta janrli) ketma-ket almashtiradi; FM tugmasini bosib turish «Media manbalari»ni ochadi.',
         'Qurilma papkalari MP3, WAV, FLAC, OGG, M4A (ID3 muqovalari bilan), shuningdek video (.mp4, .webm, .mov) va rasmlarni (.jpg, .png, .webp) qo‘llab-quvvatlaydi.',
         'Bir nechta rasm va video tanlansa, ketma-ket ijro etiladi (har bir rasm 5 soniya). Fayllarni sahnaga sudrab tashlash ham mumkin.',
-        'URL orqali Audius, GitHub papkalari, Archive.org, JSON/M3U/RSS va to‘g‘ridan-to‘g‘ri MP3 oqimlarini oching.',
+        'URL bo‘limida 12 ta tayyor FM stansiya (2 ta milliy + 10 ta janrli) mavjud bo‘lib, Audius, GitHub, Archive.org, JSON/M3U/PLS/RSS va to‘g‘ridan-to‘g‘ri oqimlar ishlaydi.',
       ],
     },
     {
@@ -1045,7 +1076,7 @@ const UZ_HELP: HelpMessages = {
       items: [
         'Boshqaruv panelini yashirib faqat musiqaga mos uchuvchi sferalarni qoldirish uchun bo‘sh fonni (yoki Ko‘z tugmasini) bosing.',
         'Boshqa sferaga bosish trekni almashtiradi, faol sferaga bosish Pauza/Play qiladi. Sferalar va sarlavhalar alohida yoqiladi.',
-        'Fonga qayta bosish interfeysni tiklaydi.',
+        'Uchuvchi sferalar rejimida animatsiya fonini surib vizual mavzuni almashtiring; qisqa bosish interfeysni tiklaydi.',
       ],
     },
     {
@@ -1070,9 +1101,10 @@ const UZ_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. Ekvalayzer, To‘liq ekran va PWA',
+      title: '6. Ekvalayzer, Bulut, To‘liq ekran va PWA',
       items: [
-        '5 diapazonli ekvalayzer (60 Hz – 14 kHz) tinglashda ham, MP4 eksportida ham ishlaydi.',
+        'Yuqori panel yoki menyudagi 5 diapazonli ekvalayzer (60 Hz – 14 kHz) tinglashda ham, MP4 eksportida ham ishlaydi.',
+        'Audius, papka va URL manbalarini qurilmalar o‘rtasida sinxronlash uchun Email/parol yoki Google orqali kiring.',
         'Yuqori panel yoki menyudan To‘liq ekranni yoqing hamda pleyerni oflayn PWA ilova sifatida o‘rnating.',
       ],
     },
@@ -1090,10 +1122,11 @@ const KK_HELP: HelpMessages = {
       id: 'sources',
       title: '1. Музыка, фото және бейне көздері',
       items: [
-        'Көзді таңдау үшін трек мұқабасын немесе Audius / Қалта / URL түймелерін басыңыз.',
+        'Көзді таңдау үшін мұқабаны не Audius / Қалта / URL басыңыз, я болмаса шаршы мұқабаны сырғытып (свайп) келесі тректі не FM станциясын қосыңыз.',
+        'Төменгі панельдегі жарқыраған FM батырмасы 12 орнатылған радионы (алдымен тіліңіздегі 2 ұлттық арна + 10 жанрлық) ретімен ауыстырады; FM-ді ұзақ басу «Медиа көздерін» ашады.',
         'Құрылғы қалталары MP3, WAV, FLAC, OGG, M4A (ID3 мұқабаларымен), сондай-ақ бейне (.mp4, .webm, .mov) және фото (.jpg, .png, .webp) қолдайды.',
         'Бірнеше фото мен бейне таңдалса, кезекпен ойнатылады (әр фото 5 секунд). Файлдарды экранға сүйреп тастауға да болады.',
-        'URL арқылы Audius профильдерін, GitHub қалталарын, Archive.org, JSON/M3U/RSS тізімдерін және тікелей MP3 ашуға болады.',
+        'URL бөлімінде 12 дайын FM станция (2 ұлттық + 10 жанрлық) бар және Audius, GitHub, Archive.org, JSON/M3U/PLS/RSS пен тікелей ағындарды қолдайды.',
       ],
     },
     {
@@ -1111,7 +1144,7 @@ const KK_HELP: HelpMessages = {
       items: [
         'Басқару панелін жасырып тек әуенге ілесетін шарларды қалдыру үшін бос фонды (немесе Көз белгісін) басыңыз.',
         'Басқа шарды басу тректі ауыстырады, белсенді шар — Ойнату/Кідірту. Шарлар мен атаулар бөлек қосылады.',
-        'Фонды қайта түрту интерфейсті қайтарады.',
+        'Ұшатын шарлар режимінде анимация фонын сырғытып визуалды тақырыпты ауыстырыңыз; қысқа түрту интерфейсті қайтарады.',
       ],
     },
     {
@@ -1136,9 +1169,10 @@ const KK_HELP: HelpMessages = {
     },
     {
       id: 'audioAndApp',
-      title: '6. Эквалайзер, Толық экран және PWA',
+      title: '6. Эквалайзер, Бұлт, Толық экран және PWA',
       items: [
-        '5 жолақты эквалайзер (60 Гц – 14 кГц) тыңдау кезінде де, MP4 экспортында да жұмыс істейді.',
+        'Жоғарғы панель мен мәзірдегі 5 жолақты эквалайзер (60 Гц – 14 кГц) тыңдау кезінде де, MP4 экспортында да жұмыс істейді.',
+        'Audius, қалта және URL көздерін құрылғылар арасында синхрондау үшін Email/құпиясөз не Google арқылы кіріңіз.',
         'Жоғарғы панельден не мәзірден Толық экранды қосыңыз немесе офлайн PWA қолданбасын орнатыңыз.',
       ],
     },

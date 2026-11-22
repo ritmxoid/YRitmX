@@ -30,7 +30,7 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
-import { DragEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DragEvent, MouseEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EqualizerModal } from './components/EqualizerModal';
 import { FloatingTrackOrbs } from './components/FloatingTrackOrbs';
 import { HelpModal } from './components/HelpModal';
@@ -137,16 +137,18 @@ import {
 } from './utils/playbackSession';
 import { loadTracksFromUrlSource } from './utils/urlSourceParser';
 import {
-  DEFAULT_FM_STATIONS,
+  extractShortRadioName,
   findDefaultFmStationByUrl,
+  getDefaultFmStationsForLang,
   getFmStationLabel,
+  isNationalFmUrlForOtherLang,
 } from './constants/radioStations';
 
 const STORAGE_PROFILES_KEY = 'yritmx_profiles';
 const STORAGE_HANDLE_KEY = 'yritmx_current_handle';
 const STORAGE_FOLDERS_KEY = 'yritmx_saved_folders';
 const STORAGE_URLS_KEY = 'yritmx_saved_urls';
-const STORAGE_DEFAULT_FM_SEEDED_KEY = 'yritmx_default_fm_v1';
+const STORAGE_DEFAULT_FM_SEEDED_KEY = 'yritmx_default_fm_v2';
 const STORAGE_CAPTIONS_KEY = 'yritmx_orb_captions';
 const STORAGE_ORBS_KEY = 'yritmx_show_orbs';
 const STORAGE_INSTALL_PROMO_KEY = 'yritmx_install_promo_seen';
@@ -154,7 +156,6 @@ const STORAGE_RECORD_RENDER_MODE_KEY = 'yritmx_record_render_mode';
 const STORAGE_CAROUSEL_MODE_KEY = 'yritmx_carousel_mode';
 const STORAGE_CAROUSEL_INTERVAL_KEY = 'yritmx_carousel_interval_sec';
 const STORAGE_MANUAL_AUDIUS_KEY = 'yritmx_manual_audius';
-const FALLBACK_RADIO_STREAM_URL = 'https://media-ice.musicradio.com/CapitalMP3';
 const IMAGE_SLIDE_DURATION_SEC = 5;
 
 function shuffleTracksArray<T>(items: T[]): T[] {
@@ -337,6 +338,22 @@ export default function App() {
   const offlineAbortRef = useRef<AbortController | null>(null);
   const playHoldTimerRef = useRef(0);
   const playHoldTriggeredRef = useRef(false);
+  const fmHoldTimerRef = useRef(0);
+  const fmHoldTriggeredRef = useRef(false);
+  const coverSwipeStartRef = useRef<{
+    x: number;
+    y: number;
+    pointerId: number;
+    triggered: boolean;
+  } | null>(null);
+  const coverSwipeHandledRef = useRef(false);
+  const stageSwipeStartRef = useRef<{
+    x: number;
+    y: number;
+    pointerId: number;
+    triggered: boolean;
+  } | null>(null);
+  const stageSwipeHandledRef = useRef(false);
   const isRecordingRef = useRef(false);
   const objectUrlsRef = useRef<string[]>([]);
   const folderCacheRef = useRef<Map<string, Track[]>>(new Map());
@@ -364,6 +381,8 @@ export default function App() {
   const httpsUpgradeAttemptedKeyRef = useRef('');
   const mirrorRetriesRef = useRef(0);
   const lastFmIndexRef = useRef(-1);
+  const lastFmLangRef = useRef(lang);
+  const prevLangRef = useRef(lang);
   const fmFlyoutSeqRef = useRef(0);
   const fmFlyoutTimerRef = useRef(0);
 
@@ -492,21 +511,19 @@ export default function App() {
       alreadySeeded = false;
     }
 
-    if (!alreadySeeded || existing.length === 0) {
+    const langStations = getDefaultFmStationsForLang(lang);
+    const shouldSeedOrMigrate = !alreadySeeded || existing.length === 0;
+
+    if (shouldSeedOrMigrate) {
       const now = Date.now();
-      const existingUrlSet = new Set(existing.map((e) => e.url.trim()));
-      const additions: SavedUrlEntry[] = [];
-      DEFAULT_FM_STATIONS.forEach((station, idx) => {
-        if (!existingUrlSet.has(station.url)) {
-          additions.push({
-            id: `url-${hashString(station.url)}`,
-            url: station.url,
-            label: `RadioFM: ${getFmStationLabel(station, lang)}`,
-            addedAt: now - idx,
-          });
-        }
-      });
-      const merged = [...existing, ...additions];
+      const customEntries = existing.filter((entry) => !findDefaultFmStationByUrl(entry.url));
+      const seededDefaultEntries: SavedUrlEntry[] = langStations.map((station, idx) => ({
+        id: `url-${hashString(station.url)}`,
+        url: station.url,
+        label: `${t.radioFmLabel}: ${getFmStationLabel(station, lang)}`,
+        addedAt: now - idx,
+      }));
+      const merged = [...seededDefaultEntries, ...customEntries];
       try {
         localStorage.setItem(STORAGE_URLS_KEY, JSON.stringify(merged));
         localStorage.setItem(STORAGE_DEFAULT_FM_SEEDED_KEY, '1');
@@ -597,26 +614,86 @@ export default function App() {
     savedUrlsRef.current = savedUrls;
   }, [savedUrls]);
 
-  // Keep default FM station labels localized when language changes
+  // Keep default and custom FM station labels localized and swap national stations when language changes
   useEffect(() => {
+    const langChanged = prevLangRef.current !== lang;
+    prevLangRef.current = lang;
+
     setSavedUrls((prev) => {
       let changed = false;
-      const next = prev.map((entry) => {
-        const matched = findDefaultFmStationByUrl(entry.url);
-        if (!matched) return entry;
-        const localizedLabel = `RadioFM: ${getFmStationLabel(matched, lang)}`;
-        const nextUrl = matched.url;
-        const nextId = `url-${hashString(nextUrl)}`;
-        if (entry.label === localizedLabel && entry.url === nextUrl && entry.id === nextId) {
-          return entry;
+      let working = prev;
+
+      if (langChanged) {
+        const nationalStations = getDefaultFmStationsForLang(lang).slice(0, 2);
+        const filtered = prev.filter((entry) => {
+          if (isNationalFmUrlForOtherLang(entry.url, lang)) {
+            changed = true;
+            return false;
+          }
+          return true;
+        });
+
+        const existingUrls = new Set(filtered.map((e) => e.url.trim()));
+        const missingNational = nationalStations.filter((st) => !existingUrls.has(st.url));
+        if (missingNational.length > 0) {
+          changed = true;
+          const now = Date.now();
+          const newNationalEntries: SavedUrlEntry[] = missingNational.map((station, idx) => ({
+            id: `url-${hashString(station.url)}`,
+            url: station.url,
+            label: `${t.radioFmLabel}: ${getFmStationLabel(station, lang)}`,
+            addedAt: now - idx,
+          }));
+          const firstDefaultIdx = filtered.findIndex((e) => Boolean(findDefaultFmStationByUrl(e.url)));
+          if (firstDefaultIdx === -1) {
+            working = [...newNationalEntries, ...filtered];
+          } else {
+            working = [
+              ...filtered.slice(0, firstDefaultIdx),
+              ...newNationalEntries,
+              ...filtered.slice(firstDefaultIdx),
+            ];
+          }
+        } else {
+          working = filtered;
         }
-        changed = true;
-        return {
-          ...entry,
-          id: nextId,
-          url: nextUrl,
-          label: localizedLabel,
-        };
+      }
+
+      const next = working.map((entry) => {
+        const matched = findDefaultFmStationByUrl(entry.url);
+        if (matched) {
+          const localizedLabel = `${t.radioFmLabel}: ${getFmStationLabel(matched, lang)}`;
+          const nextUrl = matched.url;
+          const nextId = `url-${hashString(nextUrl)}`;
+          if (entry.label === localizedLabel && entry.url === nextUrl && entry.id === nextId) {
+            return entry;
+          }
+          changed = true;
+          return {
+            ...entry,
+            id: nextId,
+            url: nextUrl,
+            label: localizedLabel,
+          };
+        }
+
+        const radioPrefixMatch = entry.label.match(/^(?:RadioFM|РадиоФМ|РадіоФМ)(?::\s*(.*))?$/i);
+        if (radioPrefixMatch) {
+          const rawRest = (radioPrefixMatch[1] || '').trim();
+          const refined =
+            !rawRest || /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(rawRest)
+              ? extractShortRadioName(entry.url) || rawRest
+              : rawRest;
+          const localizedCustomLabel = refined ? `${t.radioFmLabel}: ${refined}` : t.radioFmLabel;
+          if (entry.label !== localizedCustomLabel) {
+            changed = true;
+            return {
+              ...entry,
+              label: localizedCustomLabel,
+            };
+          }
+        }
+        return entry;
       });
       if (!changed) return prev;
       try {
@@ -626,7 +703,7 @@ export default function App() {
       }
       return next;
     });
-  }, [lang]);
+  }, [lang, t.radioFmLabel]);
 
   useEffect(() => {
     activeUrlIdRef.current = activeUrlId;
@@ -746,6 +823,7 @@ export default function App() {
           showToast(cloudT.cloudLoadedToast(addedCount), 'info');
         }
       } catch {
+        cloudSyncFetchedUidRef.current = null;
         // Non-fatal: keep offline/local lists usable if Firestore fetch fails
       }
     },
@@ -1914,13 +1992,22 @@ export default function App() {
       } catch (err) {
         const isBrowserOnline =
           typeof navigator === 'undefined' ? true : navigator.onLine;
-        if (options?.isInitial && FALLBACK_RADIO_STREAM_URL && isBrowserOnline) {
+        const fallbackStation = getDefaultFmStationsForLang(lang)[0];
+        if (options?.isInitial && fallbackStation && isBrowserOnline) {
+          const fallbackLabel = getFmStationLabel(fallbackStation, lang);
+          let fallbackHost = 'RadioFM';
+          try {
+            fallbackHost = new URL(fallbackStation.url).hostname;
+          } catch {
+            // ignore
+          }
+          const fallbackUrlId = `url-${hashString(fallbackStation.url)}`;
           const radioTrack: Track = {
-            id: 'radio-fm-fallback',
-            title: 'RadioFM',
-            artist: 'Capital London',
+            id: `url-stream-${fallbackStation.url}`,
+            title: fallbackLabel,
+            artist: fallbackHost,
             cover: DEFAULT_COVER_IMAGE,
-            src: FALLBACK_RADIO_STREAM_URL,
+            src: fallbackStation.url,
             sourceName: 'RadioFM',
             mediaType: 'audio',
             isRadio: true,
@@ -1931,7 +2018,7 @@ export default function App() {
           initialRestoreConsumedRef.current = true;
           activeSessionRef.current = {
             sourceType: 'url',
-            url: FALLBACK_RADIO_STREAM_URL,
+            url: fallbackStation.url,
           };
           setPendingFolderRestore(null);
           setPlaylist([radioTrack]);
@@ -1939,7 +2026,7 @@ export default function App() {
           setCurrentTime(0);
           setDuration(0);
           setActiveFolderId(null);
-          setActiveUrlId(null);
+          setActiveUrlId(fallbackUrlId);
           setLoadError(null);
           loadTrackIntoMediaElements(radioTrack, 0);
           if (options?.autoPlay) {
@@ -1948,7 +2035,7 @@ export default function App() {
               setAwaitingAutoplayUnlock(true);
             }
           }
-          trackEvent('source_radio_fallback', { handle });
+          trackEvent('source_radio_fallback', { handle, station: fallbackStation.key });
         } else if (options?.isInitial && !isBrowserOnline) {
           setLoadError(null);
         } else {
@@ -1962,6 +2049,7 @@ export default function App() {
     },
     [
       autoVisualPerTrack,
+      lang,
       persistCurrentSession,
       randomizeVisual,
       revokeLocalObjectUrls,
@@ -2473,7 +2561,7 @@ export default function App() {
               sourceName: 'RadioFM',
             }))
           : rawTracks;
-        const label = localizedStationName ? `RadioFM: ${localizedStationName}` : rawLabel;
+        const label = localizedStationName ? `${t.radioFmLabel}: ${localizedStationName}` : rawLabel;
         revokeLocalObjectUrls();
 
         const urlId = `url-${hashString(normalizedUrl)}`;
@@ -2588,18 +2676,24 @@ export default function App() {
     ]
   );
 
-  const handleCycleFmStation = useCallback(async () => {
+  const handleCycleFmStation = useCallback(async (step: 1 | -1 = 1) => {
+    const fmStations = getDefaultFmStationsForLang(lang);
+    if (lastFmLangRef.current !== lang) {
+      lastFmIndexRef.current = -1;
+      lastFmLangRef.current = lang;
+    }
     const activeTrackNow = playlistRef.current[currentIndexRef.current];
     const currentMatchedIdx = activeTrackNow?.src
-      ? DEFAULT_FM_STATIONS.findIndex((s) => s.url === activeTrackNow.src)
+      ? fmStations.findIndex((s) => s.url === activeTrackNow.src)
       : -1;
+    const totalStations = fmStations.length;
     const nextIdx =
       currentMatchedIdx !== -1
-        ? (currentMatchedIdx + 1) % DEFAULT_FM_STATIONS.length
-        : (lastFmIndexRef.current + 1) % DEFAULT_FM_STATIONS.length;
+        ? (currentMatchedIdx + step + totalStations) % totalStations
+        : (lastFmIndexRef.current + step + totalStations) % totalStations;
     lastFmIndexRef.current = nextIdx;
 
-    const station = DEFAULT_FM_STATIONS[nextIdx];
+    const station = fmStations[nextIdx];
     const stationLabel = getFmStationLabel(station, lang);
     const urlId = `url-${hashString(station.url)}`;
 
@@ -2641,7 +2735,7 @@ export default function App() {
         {
           id: urlId,
           url: station.url,
-          label: `RadioFM: ${stationLabel}`,
+          label: `${t.radioFmLabel}: ${stationLabel}`,
           addedAt: Date.now(),
         },
       ];
@@ -2704,6 +2798,7 @@ export default function App() {
     revokeLocalObjectUrls,
     startPlaybackSafe,
     syncRadioCarouselForTrack,
+    t.radioFmLabel,
   ]);
 
   // Track browser online/offline transitions smoothly
@@ -4068,6 +4163,34 @@ export default function App() {
         err && typeof err === 'object' && 'code' in err
           ? String((err as { code?: unknown }).code)
           : '';
+      if (code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        return {
+          code,
+          message:
+            lang === 'ru'
+              ? `Домен ${host || 'сайта'} не разрешён в Firebase Console → Authentication → Settings → Authorized domains`
+              : `Domain ${host || 'host'} is not in Firebase Console → Authentication → Settings → Authorized domains`,
+        };
+      }
+      if (code === 'auth/popup-blocked') {
+        return {
+          code,
+          message:
+            lang === 'ru'
+              ? 'Окно входа Google заблокировано браузером или iframe. Разрешите всплывающие окна или откройте приложение в отдельной вкладке.'
+              : 'Google sign-in popup was blocked by browser or iframe. Allow popups or open the app in a separate tab.',
+        };
+      }
+      if (code === 'auth/operation-not-supported-in-this-environment') {
+        return {
+          code,
+          message:
+            lang === 'ru'
+              ? 'Google-вход ограничен внутри встроенного окна (iframe). Откройте приложение в отдельной вкладке браузера или войдите по Email и паролю.'
+              : 'Google sign-in is restricted inside this embedded frame. Open the app in a new browser tab or use Email & Password.',
+        };
+      }
       if (code === 'auth/operation-not-allowed') {
         return { code, message: cloudT.authProviderDisabledHint };
       }
@@ -4085,9 +4208,12 @@ export default function App() {
       if (code === 'auth/weak-password') {
         return { code, message: cloudT.authWeakPasswordError };
       }
-      return { code, message: cloudT.cloudAuthErrorToast };
+      return {
+        code,
+        message: code ? `${cloudT.cloudAuthErrorToast} (${code})` : cloudT.cloudAuthErrorToast,
+      };
     },
-    [cloudT]
+    [cloudT, lang]
   );
 
   const handleSaveToCloud = useCallback(
@@ -4115,12 +4241,12 @@ export default function App() {
   );
 
   const handleSignInGoogleCloud = useCallback(
-    async (saveAfterTab?: SourceTab): Promise<boolean> => {
+    async (saveAfterTab?: SourceTab): Promise<{ ok: boolean; errorMsg?: string }> => {
       try {
         const user = await signInWithGoogleCloud();
         if (!user) {
           showToast(cloudT.cloudAuthErrorToast, 'error');
-          return false;
+          return { ok: false, errorMsg: cloudT.cloudAuthErrorToast };
         }
         cloudUserRef.current = user;
         setCloudUser(user);
@@ -4128,17 +4254,17 @@ export default function App() {
         if (saveAfterTab) {
           await handleSaveToCloud(saveAfterTab, user);
         }
-        return true;
+        return { ok: true };
       } catch (err) {
         const { code, message } = mapAuthErrorMessage(err);
         if (
           code === 'auth/popup-closed-by-user' ||
           code === 'auth/cancelled-popup-request'
         ) {
-          return false;
+          return { ok: false };
         }
         showToast(message, 'error');
-        return false;
+        return { ok: false, errorMsg: message };
       }
     },
     [cloudT, handleSaveToCloud, mapAuthErrorMessage, showToast, syncFromCloudForUser]
@@ -5251,7 +5377,99 @@ export default function App() {
     trackEvent('stage_media_clear');
   }, [revokeStageMediaQueueUrls, showToast, stopCameraStream, stopMicStream, studioT]);
 
+  const isFloatingOrbsActive =
+    !uiVisible &&
+    showOrbs &&
+    !isStudioMode &&
+    !isRecordArmed &&
+    !isRecording &&
+    !isClassicVideoPlayer &&
+    !isImageTrack &&
+    !(
+      !cameraOverlayActive &&
+      customStageMedia?.displayMode === 'backdrop' &&
+      customStageMedia.backdropOverlay === 'clean'
+    );
+
+  const handleStagePointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+    if (!isFloatingOrbsActive) return;
+    if (
+      isSourcesOpen ||
+      isEqOpen ||
+      isStageMediaOpen ||
+      isMobileMenuOpen ||
+      isMobilePlaylistOpen ||
+      isHelpOpen ||
+      isInstallGuideOpen ||
+      isInstallPromoOpen
+    ) {
+      return;
+    }
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const target = e.target as HTMLElement | null;
+    if (
+      target?.closest(
+        'header, footer, button, a, input, select, textarea, [role="slider"], [data-no-zen-toggle="true"]'
+      )
+    ) {
+      return;
+    }
+    stageSwipeHandledRef.current = false;
+    stageSwipeStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      pointerId: e.pointerId,
+      triggered: false,
+    };
+  };
+
+  const handleStagePointerMove = (e: ReactPointerEvent<HTMLElement>) => {
+    const start = stageSwipeStartRef.current;
+    if (!start || start.pointerId !== e.pointerId || start.triggered) return;
+    const dist = Math.hypot(e.clientX - start.x, e.clientY - start.y);
+    if (dist >= 40) {
+      start.triggered = true;
+      stageSwipeHandledRef.current = true;
+      randomizeVisual();
+      trackEvent('orbs_bg_swipe_theme');
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate(10);
+        } catch {
+          // ignore
+        }
+      }
+      window.setTimeout(() => {
+        stageSwipeHandledRef.current = false;
+      }, 400);
+    }
+  };
+
+  const handleStagePointerUp = (e: ReactPointerEvent<HTMLElement>) => {
+    const start = stageSwipeStartRef.current;
+    if (start && start.pointerId === e.pointerId && !start.triggered) {
+      const dist = Math.hypot(e.clientX - start.x, e.clientY - start.y);
+      if (dist >= 40) {
+        stageSwipeHandledRef.current = true;
+        randomizeVisual();
+        trackEvent('orbs_bg_swipe_theme');
+        window.setTimeout(() => {
+          stageSwipeHandledRef.current = false;
+        }, 400);
+      }
+    }
+    stageSwipeStartRef.current = null;
+  };
+
+  const handleStagePointerCancel = () => {
+    stageSwipeStartRef.current = null;
+  };
+
   const handleStageBackgroundClick = (e: MouseEvent<HTMLElement>) => {
+    if (stageSwipeHandledRef.current) {
+      stageSwipeHandledRef.current = false;
+      return;
+    }
     if (
       isRecording ||
       isRecordArmed ||
@@ -5260,6 +5478,7 @@ export default function App() {
       isStageMediaOpen ||
       isMobileMenuOpen ||
       isMobilePlaylistOpen ||
+      isHelpOpen ||
       isInstallGuideOpen ||
       isInstallPromoOpen ||
       isStudioMode
@@ -5279,6 +5498,97 @@ export default function App() {
       trackEvent('zen_mode_toggle', { zen_enabled: !nextVisible, trigger: 'stage_click' });
       return nextVisible;
     });
+  };
+
+  const triggerCoverSwipe = useCallback(
+    (direction: 'next' | 'prev') => {
+      if (currentTrack?.isRadio && playlist.length <= 1) {
+        void handleCycleFmStation(direction === 'next' ? 1 : -1);
+      } else if (playlist.length > 0) {
+        if (direction === 'next') {
+          nextTrack(true);
+        } else {
+          const prevIdx = isShuffle
+            ? Math.floor(Math.random() * playlist.length)
+            : (currentIndex - 1 + playlist.length) % playlist.length;
+          void selectTrack(prevIdx, true);
+        }
+      }
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate(12);
+        } catch {
+          // ignore
+        }
+      }
+    },
+    [currentIndex, currentTrack?.isRadio, handleCycleFmStation, isShuffle, nextTrack, playlist.length, selectTrack]
+  );
+
+  const handleCoverPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    coverSwipeHandledRef.current = false;
+    coverSwipeStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      pointerId: e.pointerId,
+      triggered: false,
+    };
+  };
+
+  const handleCoverPointerMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const start = coverSwipeStartRef.current;
+    if (!start || start.pointerId !== e.pointerId || start.triggered) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (Math.abs(dx) >= 36 && Math.abs(dx) > Math.abs(dy) * 1.1) {
+      start.triggered = true;
+      coverSwipeHandledRef.current = true;
+      triggerCoverSwipe(dx < 0 ? 'next' : 'prev');
+      window.setTimeout(() => {
+        coverSwipeHandledRef.current = false;
+      }, 450);
+    }
+  };
+
+  const handleCoverPointerUp = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const start = coverSwipeStartRef.current;
+    if (start && start.pointerId === e.pointerId && !start.triggered) {
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      if (Math.abs(dx) >= 36 && Math.abs(dx) > Math.abs(dy) * 1.1) {
+        coverSwipeHandledRef.current = true;
+        triggerCoverSwipe(dx < 0 ? 'next' : 'prev');
+        window.setTimeout(() => {
+          coverSwipeHandledRef.current = false;
+        }, 450);
+      }
+    }
+    coverSwipeStartRef.current = null;
+  };
+
+  const handleCoverPointerCancel = () => {
+    coverSwipeStartRef.current = null;
+  };
+
+  const handleFmHoldStart = () => {
+    window.clearTimeout(fmHoldTimerRef.current);
+    fmHoldTriggeredRef.current = false;
+    fmHoldTimerRef.current = window.setTimeout(() => {
+      fmHoldTriggeredRef.current = true;
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate(16);
+        } catch {
+          // ignore
+        }
+      }
+      openSources('url');
+    }, 550);
+  };
+
+  const handleFmHoldCancel = () => {
+    window.clearTimeout(fmHoldTimerRef.current);
   };
 
   const handleStageDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -5371,10 +5681,16 @@ export default function App() {
   return (
     <div
       data-app-version={APP_VERSION}
+      onPointerDown={handleStagePointerDown}
+      onPointerMove={handleStagePointerMove}
+      onPointerUp={handleStagePointerUp}
+      onPointerCancel={handleStagePointerCancel}
       onClick={handleStageBackgroundClick}
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleStageDrop}
-      className="min-h-[100dvh] bg-[#0a0a0c] text-gray-100 flex flex-col justify-between relative overflow-x-hidden"
+      className={`min-h-[100dvh] bg-[#0a0a0c] text-gray-100 flex flex-col justify-between relative overflow-x-hidden ${
+        isFloatingOrbsActive ? 'touch-none' : ''
+      }`}
     >
       {/* UNIFIED FULL-SCREEN REACTIVE CANVAS + STUDIO FRAME + MP4 CAPTURE */}
       <VisualizerCanvas
@@ -5776,18 +6092,7 @@ export default function App() {
       />
 
       {/* ZEN MODE: FLOATING CIRCULAR TRACK ORBS (AUDIO MODE ONLY; hidden in Record Armed/Active or Clean Fullscreen backdrop) */}
-      {!uiVisible &&
-        showOrbs &&
-        !isStudioMode &&
-        !isRecordArmed &&
-        !isRecording &&
-        !isClassicVideoPlayer &&
-        !isImageTrack &&
-        !(
-          !cameraOverlayActive &&
-          customStageMedia?.displayMode === 'backdrop' &&
-          customStageMedia.backdropOverlay === 'clean'
-        ) && (
+      {isFloatingOrbsActive && (
         <FloatingTrackOrbs
           tracks={playlist}
           currentIndex={currentIndex}
@@ -6095,13 +6400,24 @@ export default function App() {
         >
           <button
             type="button"
-            onClick={() => openSources(!isOnline && playlist.length === 0 ? 'folder' : 'audius')}
+            onPointerDown={handleCoverPointerDown}
+            onPointerMove={handleCoverPointerMove}
+            onPointerUp={handleCoverPointerUp}
+            onPointerCancel={handleCoverPointerCancel}
+            onClick={() => {
+              if (coverSwipeHandledRef.current) {
+                coverSwipeHandledRef.current = false;
+                return;
+              }
+              openSources(!isOnline && playlist.length === 0 ? 'folder' : 'audius');
+            }}
             aria-label={t.coverAriaLabel}
-            className="relative group w-56 h-56 sm:w-64 sm:h-64 lg:w-72 lg:h-72 xl:w-80 xl:h-80 [@media(max-height:540px)_and_(orientation:landscape)]:w-36 [@media(max-height:540px)_and_(orientation:landscape)]:h-36 [@media(min-height:541px)_and_(max-height:700px)_and_(orientation:landscape)]:w-48 [@media(min-height:541px)_and_(max-height:700px)_and_(orientation:landscape)]:h-48 rounded-3xl overflow-hidden glass shadow-2xl shadow-purple-950/50 border border-white/10 transition-transform duration-300 hover:scale-[1.02] cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+            className="relative group w-56 h-56 sm:w-64 sm:h-64 lg:w-72 lg:h-72 xl:w-80 xl:h-80 [@media(max-height:540px)_and_(orientation:landscape)]:w-36 [@media(max-height:540px)_and_(orientation:landscape)]:h-36 [@media(min-height:541px)_and_(max-height:700px)_and_(orientation:landscape)]:w-48 [@media(min-height:541px)_and_(max-height:700px)_and_(orientation:landscape)]:h-48 rounded-3xl overflow-hidden glass shadow-2xl shadow-purple-950/50 border border-white/10 transition-transform duration-300 hover:scale-[1.02] cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 touch-pan-y select-none"
           >
             <img
               src={currentTrack?.cover || DEFAULT_COVER_IMAGE}
               alt={currentTrack?.title || 'YRitmX'}
+              draggable={false}
               referrerPolicy="no-referrer"
               onError={(e) => {
                 const img = e.currentTarget;
@@ -6110,7 +6426,7 @@ export default function App() {
                   img.src = DEFAULT_COVER_IMAGE;
                 }
               }}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover select-none"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent" />
 
@@ -6120,7 +6436,7 @@ export default function App() {
 
             <div className="absolute bottom-4 left-4 right-4">
               <div className="text-[11px] font-medium text-purple-300 mb-1 truncate">
-                {currentTrack?.sourceName ||
+                {(currentTrack?.isRadio ? t.radioFmLabel : currentTrack?.sourceName) ||
                   (pendingFolderRestore
                     ? `${t.folderPrefix}: ${pendingFolderRestore.folderName}`
                     : !isOnline
@@ -6414,9 +6730,20 @@ export default function App() {
               )}
               <button
                 type="button"
-                onClick={() => void handleCycleFmStation()}
+                onPointerDown={handleFmHoldStart}
+                onPointerUp={handleFmHoldCancel}
+                onPointerLeave={handleFmHoldCancel}
+                onPointerCancel={handleFmHoldCancel}
+                onContextMenu={(e) => e.preventDefault()}
+                onClick={() => {
+                  if (fmHoldTriggeredRef.current) {
+                    fmHoldTriggeredRef.current = false;
+                    return;
+                  }
+                  void handleCycleFmStation(1);
+                }}
                 aria-label="FM"
-                className={`relative overflow-hidden h-10 px-3 rounded-xl border flex items-center justify-center cursor-pointer transition-transform active:scale-95 animate-fm-btn-glow ${
+                className={`relative overflow-hidden h-10 px-3 rounded-xl border flex items-center justify-center cursor-pointer select-none touch-manipulation transition-transform active:scale-95 animate-fm-btn-glow ${
                   currentTrack?.isRadio
                     ? 'bg-gradient-to-tr from-cyan-500/30 via-purple-500/30 to-fuchsia-500/30 text-white'
                     : 'bg-gradient-to-tr from-cyan-500/15 via-purple-500/20 to-fuchsia-500/20 text-cyan-100 hover:text-white'

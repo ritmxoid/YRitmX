@@ -1,9 +1,9 @@
-import { SupportedLang } from '../i18n/translations';
+import { getInitialLanguage, SupportedLang } from '../i18n/translations';
 
 export interface DefaultFmStation {
   key: string;
   url: string;
-  labels: Record<SupportedLang, string>;
+  labels: Partial<Record<SupportedLang, string>> & { en: string };
 }
 
 export const DEFAULT_FM_STATIONS: DefaultFmStation[] = [
@@ -239,13 +239,258 @@ export const DEFAULT_FM_STATIONS: DefaultFmStation[] = [
   },
 ];
 
+// Two free, verified national music stations per supported language (placed FIRST before the 10 genre stations)
+export const NATIONAL_FM_BY_LANG: Record<SupportedLang, DefaultFmStation[]> = {
+  en: [
+    {
+      key: 'nat-en-capital',
+      url: 'https://media-ice.musicradio.com/CapitalMP3',
+      labels: { en: 'Capital UK', ru: 'Capital UK' },
+    },
+    {
+      key: 'nat-en-heartdance',
+      url: 'https://media-ssl.musicradio.com/HeartDanceMP3',
+      labels: { en: 'Heart Dance UK', ru: 'Heart Dance UK' },
+    },
+  ],
+  ru: [
+    {
+      key: 'nat-ru-zaycev',
+      url: 'https://abs.zaycev.fm/rus256k',
+      labels: {
+        ru: 'Русские хиты (Zaycev)',
+        uk: 'Російські хіти (Zaycev)',
+        kk: 'Орыс хиттері (Zaycev)',
+        en: 'Russian Hits (Zaycev)',
+      },
+    },
+    {
+      key: 'nat-ru-record',
+      url: 'https://radiorecord.hostingradio.ru/russianhits96.aacp',
+      labels: {
+        ru: 'Русские хиты (Record)',
+        uk: 'Російські хіти (Record)',
+        kk: 'Орыс хиттері (Record)',
+        en: 'Russian Hits (Record)',
+      },
+    },
+  ],
+  uk: [
+    {
+      key: 'nat-uk-hitfm',
+      url: 'https://online.hitfm.ua/HitFM_HD',
+      labels: { uk: 'Хіт FM (Україна)', ru: 'Хит FM (Украина)', en: 'Hit FM Ukraine' },
+    },
+    {
+      key: 'nat-uk-kissfm',
+      url: 'https://online.kissfm.ua/KissFM_Ukr',
+      labels: { uk: 'Kiss FM Україна', ru: 'Kiss FM Украина', en: 'Kiss FM Ukraine' },
+    },
+  ],
+  de: [
+    {
+      key: 'nat-de-swr3',
+      url: 'https://liveradio.swr.de/sw282p3/swr3/play.mp3',
+      labels: { de: 'SWR3 Pop', en: 'SWR3 Germany', ru: 'SWR3 Германия' },
+    },
+    {
+      key: 'nat-de-1live',
+      url: 'https://wdr-1live-live.icecastssl.wdr.de/wdr/1live/live/mp3/128/stream.mp3',
+      labels: { de: '1LIVE (WDR)', en: '1LIVE Germany', ru: '1LIVE Германия' },
+    },
+  ],
+  fr: [
+    {
+      key: 'nat-fr-rfm',
+      url: 'https://stream.rfm.fr/rfm.mp3',
+      labels: { fr: 'RFM France', en: 'RFM France', ru: 'RFM Франция' },
+    },
+    {
+      key: 'nat-fr-fip',
+      url: 'https://icecast.radiofrance.fr/fip-midfi.mp3?id=radiofrance',
+      labels: { fr: 'FIP (Radio France)', en: 'FIP Radio France', ru: 'FIP Франция' },
+    },
+  ],
+  es: [
+    {
+      key: 'nat-es-los40',
+      url: 'https://playerservices.streamtheworld.com/api/livestream-redirect/LOS40_CLASSIC.mp3',
+      labels: { es: 'LOS40 Classic', en: 'LOS40 Classic Spain', ru: 'LOS40 Classic' },
+    },
+    {
+      key: 'nat-es-rac105',
+      url: 'https://playerservices.streamtheworld.com/api/livestream-redirect/RAC105.mp3',
+      labels: { es: 'RAC105', en: 'RAC105 Spain', ru: 'RAC105 Испания' },
+    },
+  ],
+  it: [
+    {
+      key: 'nat-it-radio105',
+      url: 'https://icy.unitedradio.it/Radio105.mp3',
+      labels: { it: 'Radio 105', en: 'Radio 105 Italy', ru: 'Radio 105 Италия' },
+    },
+    {
+      key: 'nat-it-virgin',
+      url: 'https://icy.unitedradio.it/Virgin.mp3',
+      labels: { it: 'Virgin Radio Italia', en: 'Virgin Radio Italy', ru: 'Virgin Radio Италия' },
+    },
+  ],
+  pt: [
+    {
+      key: 'nat-pt-comercial',
+      url: 'https://stream-icy.bauermedia.pt/comercial.mp3',
+      labels: { pt: 'Rádio Comercial', en: 'Rádio Comercial', ru: 'Rádio Comercial' },
+    },
+    {
+      key: 'nat-pt-rfm',
+      url: 'https://23603.live.streamtheworld.com/RFMAAC.aac',
+      labels: { pt: 'RFM Portugal', en: 'RFM Portugal', ru: 'RFM Португалия' },
+    },
+  ],
+  pl: [
+    {
+      key: 'nat-pl-rmf',
+      url: 'https://rs9-krk2.rmfstream.pl/rmf_fm',
+      labels: { pl: 'RMF FM', en: 'RMF FM Poland', ru: 'RMF FM Польша' },
+    },
+    {
+      key: 'nat-pl-eska',
+      url: 'https://waw.ic.smcdn.pl/6130-1.mp3',
+      labels: { pl: 'Radio ESKA', en: 'Radio ESKA Poland', ru: 'Radio ESKA Польша' },
+    },
+  ],
+  tr: [
+    {
+      key: 'nat-tr-powerturk',
+      url: 'https://listen.powerapp.com.tr/powerturk/mpeg/icecast.audio',
+      labels: { tr: 'PowerTürk', en: 'PowerTürk', ru: 'PowerTürk' },
+    },
+    {
+      key: 'nat-tr-superfm',
+      url: 'https://playerservices.streamtheworld.com/api/livestream-redirect/SUPER_FM.mp3',
+      labels: { tr: 'Süper FM', en: 'Süper FM Turkey', ru: 'Süper FM Турция' },
+    },
+  ],
+  uz: [
+    {
+      key: 'nat-uz-ozbegim',
+      url: 'https://fm101.uz:9943/fm101_low.aac',
+      labels: { uz: "O'zbegim Taronasi", en: "O'zbegim Taronasi", ru: "O'zbegim Taronasi" },
+    },
+    {
+      key: 'nat-uz-mars',
+      url: 'https://marsfm.uz/stream.php',
+      labels: { uz: 'Mars FM (UZ)', en: 'Mars FM Uzbekistan', ru: 'Mars FM Узбекистан' },
+    },
+  ],
+  kk: [
+    {
+      key: 'nat-kk-beufm',
+      url: 'https://stream.beufm.kz/beufm',
+      labels: { kk: 'BEU FM (Қазақстан)', en: 'BEU FM Kazakhstan', ru: 'BEU FM Казахстан' },
+    },
+    {
+      key: 'nat-kk-vasheradio',
+      url: 'https://live.zhanafm.kz:8443/vasheradio',
+      labels: { kk: 'Ваше Радио (KZ)', en: 'Vashe Radio KZ', ru: 'Ваше Радио (KZ)' },
+    },
+  ],
+  zh: [
+    {
+      key: 'nat-zh-iradio',
+      url: 'https://n03.rcs.revma.com/ndk05tyy2tzuv',
+      labels: { zh: '中廣音樂網 i Radio', en: 'i Radio Mandopop', ru: 'i Radio (Китай)' },
+    },
+    {
+      key: 'nat-zh-asiafm',
+      url: 'https://n13.rcs.revma.com/xpgtqc74hv8uv',
+      labels: { zh: 'AsiaFM 亞洲電台', en: 'AsiaFM Pop', ru: 'AsiaFM (Китай)' },
+    },
+  ],
+  ja: [
+    {
+      key: 'nat-ja-jpop',
+      url: 'https://quincy.torontocast.com:2070/stream.mp3',
+      labels: { ja: 'J-Pop Sakura', en: 'J-Pop Sakura', ru: 'J-Pop Sakura (Япония)' },
+    },
+    {
+      key: 'nat-ja-citypop',
+      url: 'https://play.streamafrica.net/japancitypop',
+      labels: { ja: 'Japan City Pop', en: 'Japan City Pop', ru: 'Japan City Pop' },
+    },
+  ],
+  ko: [
+    {
+      key: 'nat-ko-listenmoe',
+      url: 'https://listen.moe/kpop/fallback',
+      labels: { ko: 'LISTEN.moe K-Pop', en: 'LISTEN.moe K-Pop', ru: 'LISTEN.moe K-Pop' },
+    },
+    {
+      key: 'nat-ko-bigb',
+      url: 'https://antares.dribbcast.com/proxy/kpop?mp=/s',
+      labels: { ko: 'Big B Radio K-Pop', en: 'Big B K-Pop', ru: 'Big B K-Pop' },
+    },
+  ],
+  ar: [
+    {
+      key: 'nat-ar-hits882',
+      url: 'https://radiohits882.radioca.st/;',
+      labels: { ar: 'راديو هيتس 88.2', en: 'Radio Hits 88.2', ru: 'Radio Hits 88.2' },
+    },
+    {
+      key: 'nat-ar-sumer',
+      url: 'https://l3.itworkscdn.net/itwaudio/9012/stream',
+      labels: { ar: 'سومر إف إم', en: 'Sumer FM Arabic', ru: 'Sumer FM (Араб.)' },
+    },
+  ],
+  hi: [
+    {
+      key: 'nat-hi-bollywood',
+      url: 'https://drive.uber.radio/uber/bollywood2010s/icecast.audio',
+      labels: { hi: 'बॉलीवुड हिट्स', en: 'Bollywood Hits', ru: 'Болливуд Хиты' },
+    },
+    {
+      key: 'nat-hi-hindigold',
+      url: 'https://azuracast.vibesounds.in:8010/radio.mp3',
+      labels: { hi: 'हिंदी गोल्ड रेडियो', en: 'Hindi Gold Radio', ru: 'Hindi Gold Radio' },
+    },
+  ],
+};
+
+export const ALL_NATIONAL_FM_STATIONS: DefaultFmStation[] = Object.values(NATIONAL_FM_BY_LANG).flat();
+
+export const ALL_DEFAULT_FM_STATIONS: DefaultFmStation[] = [
+  ...ALL_NATIONAL_FM_STATIONS,
+  ...DEFAULT_FM_STATIONS,
+];
+
+const NATIONAL_URL_TO_LANG = new Map<string, SupportedLang>();
+(Object.entries(NATIONAL_FM_BY_LANG) as Array<[SupportedLang, DefaultFmStation[]]>).forEach(
+  ([langCode, list]) => {
+    list.forEach((st) => {
+      NATIONAL_URL_TO_LANG.set(st.url.trim(), langCode);
+    });
+  }
+);
+
+export function getDefaultFmStationsForLang(lang?: SupportedLang): DefaultFmStation[] {
+  const active = lang ?? getInitialLanguage();
+  const national = NATIONAL_FM_BY_LANG[active] ?? NATIONAL_FM_BY_LANG.en;
+  return [...national, ...DEFAULT_FM_STATIONS];
+}
+
+export function isNationalFmUrlForOtherLang(url: string, activeLang: SupportedLang): boolean {
+  const owner = NATIONAL_URL_TO_LANG.get(url.trim());
+  return Boolean(owner && owner !== activeLang);
+}
+
 export function getFmStationLabel(station: DefaultFmStation, lang: SupportedLang): string {
   return station.labels[lang] ?? station.labels.en;
 }
 
 export function findDefaultFmStationByUrl(url: string): DefaultFmStation | undefined {
   const normalized = url.trim().replace(/^http:\/\//i, 'https://');
-  return DEFAULT_FM_STATIONS.find((station) => {
+  return ALL_DEFAULT_FM_STATIONS.find((station) => {
     if (station.url === url || station.url === normalized) return true;
     // Also match legacy bare mountpoints if previously saved
     if (
@@ -262,4 +507,152 @@ export function findDefaultFmStationByUrl(url: string): DefaultFmStation | undef
     }
     return false;
   });
+}
+
+const GENERIC_RADIO_TOKENS = new Set([
+  'radio',
+  'radiofm',
+  'stream',
+  'streams',
+  'listen',
+  'live',
+  'audio',
+  'music',
+  'mp3',
+  'aac',
+  'aacp',
+  'ogg',
+  'opus',
+  'flac',
+  'm3u',
+  'm3u8',
+  'pls',
+  'icecast',
+  'shoutcast',
+  'main',
+  'default',
+  'play',
+  'channel',
+]);
+
+const GENERIC_HOST_PREFIXES =
+  /^(www|ice\d*|media(?:-ice)?|listen|stream\d*|streams|live|audio|radio\d*|pub\d*|edge\d*|cdn\d*|abs|s\d+)$/i;
+
+const GENERIC_HOST_ROOTS = new Set([
+  'hostingradio',
+  'streamguys',
+  'streamguys1',
+  'streamguys2',
+  'radiojar',
+  'zeno',
+  'myradio24',
+  'cdnvideo',
+  'dline-media',
+  'musicradio',
+  'icecast',
+  'shoutcast',
+  'radioking',
+]);
+
+function toReadableStationTitle(raw: string): string {
+  const spaced = raw
+    .replace(/[_+]+/g, ' ')
+    .replace(/-/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!spaced) return '';
+  return spaced
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function cleanRadioMetaTitle(metaTitle: string): string {
+  const trimmed = metaTitle
+    .replace(/^(?:RadioFM|РадиоФМ|РадіоФМ)\s*[:-]\s*/i, '')
+    .replace(/\s*\(#\d+\)\s*/g, ' ')
+    .replace(/\s*[-–|]\s*\d{2,3}\s*k(?:bps)?(?:\s*(?:mp3|aacp?|ogg|opus))?\s*$/i, '')
+    .replace(/\s*[\[(]\s*(?:\d{2,3}\s*k(?:bps)?|mp3|aacp?|ogg|opus|flac|hq|live)\s*[\])]\s*/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!trimmed || /^(?:radio\s*fm|радио\s*фм|радіо\s*фм)$/i.test(trimmed)) {
+    return '';
+  }
+
+  if (trimmed.length <= 26) return trimmed;
+  const cut = trimmed.slice(0, 26);
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace >= 12 ? cut.slice(0, lastSpace) : cut).trim();
+}
+
+export function extractShortRadioName(rawUrl: string, metaTitle?: string): string {
+  const matched = rawUrl ? findDefaultFmStationByUrl(rawUrl) : undefined;
+  if (matched) {
+    return getFmStationLabel(matched, getInitialLanguage());
+  }
+
+  if (metaTitle) {
+    const cleanedMeta = cleanRadioMetaTitle(metaTitle);
+    if (cleanedMeta) return cleanedMeta;
+  }
+
+  let parsed: URL | null = null;
+  try {
+    if (rawUrl) parsed = new URL(rawUrl);
+  } catch {
+    parsed = null;
+  }
+
+  let hostShort = '';
+  if (parsed) {
+    const hostParts = parsed.hostname.toLowerCase().split('.').filter(Boolean);
+    const meaningfulHostParts = hostParts.filter((part, idx) => {
+      if (idx === hostParts.length - 1 && part.length <= 4) return false; // TLD
+      if (GENERIC_HOST_PREFIXES.test(part)) return false;
+      if (GENERIC_HOST_ROOTS.has(part)) return false;
+      return true;
+    });
+    const hostCandidate = meaningfulHostParts[0] || hostParts[0] || '';
+    if (hostCandidate && !GENERIC_HOST_PREFIXES.test(hostCandidate)) {
+      hostShort = toReadableStationTitle(hostCandidate);
+    }
+
+    const pathSegments = parsed.pathname.split('/').filter(Boolean);
+    const lastSeg = pathSegments[pathSegments.length - 1] || '';
+    const cleanedPath = decodeURIComponent(lastSeg)
+      .replace(/\.(mp3|aac|aacp|ogg|opus|flac|wav|m4a|m3u8?|pls)$/i, '')
+      .replace(/^\d{2,4}[-_]+/, '') // strip leading station numeric prefixes like 181-
+      .replace(/[-_]?(?:32|48|56|64|80|96|112|128|160|192|224|256|320)k?(?:[-_]?(?:mp3|aacp?|ogg|opus|flac))?$/i, '')
+      .replace(/(?:mp3|aacp?|ogg|opus|flac)$/i, '')
+      .replace(/^[-_]+|[-_]+$/g, '')
+      .trim();
+
+    if (
+      cleanedPath &&
+      !/^\d+$/.test(cleanedPath) &&
+      !GENERIC_RADIO_TOKENS.has(cleanedPath.toLowerCase())
+    ) {
+      const pathTitle = toReadableStationTitle(cleanedPath);
+      if (pathTitle) {
+        if (
+          pathTitle.length <= 3 &&
+          hostShort &&
+          hostShort.toLowerCase() !== pathTitle.toLowerCase()
+        ) {
+          return `${hostShort} ${pathTitle}`.slice(0, 26);
+        }
+        return pathTitle.slice(0, 26);
+      }
+    }
+
+    if (hostShort) {
+      return hostShort.slice(0, 26);
+    }
+
+    return parsed.hostname.replace(/^www\./i, '').slice(0, 26);
+  }
+
+  return '';
 }

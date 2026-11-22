@@ -17,7 +17,7 @@ import {
   getDoc,
   getDocFromServer,
   getDocs,
-  getFirestore,
+  initializeFirestore,
   query,
   serverTimestamp,
   setDoc,
@@ -28,7 +28,14 @@ import firebaseConfig from '../../firebase-applet-config.json';
 import { SavedFolderEntry, SavedUrlEntry } from '../types/audio';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = initializeFirestore(
+  app,
+  {
+    experimentalForceLongPolling: true,
+    experimentalLongPollingOptions: { timeoutSeconds: 20 },
+  },
+  firebaseConfig.firestoreDatabaseId
+);
 export const auth = getAuth(app);
 
 const googleProvider = new GoogleAuthProvider();
@@ -103,6 +110,9 @@ export function handleFirestoreError(
 }
 
 async function testConnection(): Promise<void> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return;
+  }
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {

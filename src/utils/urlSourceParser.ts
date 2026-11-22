@@ -1,3 +1,4 @@
+import { extractShortRadioName } from '../constants/radioStations';
 import { DEFAULT_COVER_IMAGE } from '../constants/visualizer';
 import { getTranslations } from '../i18n/translations';
 import { Track } from '../types/audio';
@@ -24,9 +25,11 @@ function buildRadioStreamResult(normalizedUrl: string, parsedUrl: URL): {
   label: string;
   normalizedUrl: string;
 } {
+  const t = getTranslations();
+  const shortName = extractShortRadioName(normalizedUrl);
   const track: Track = {
     id: `url-stream-${normalizedUrl}`,
-    title: 'RadioFM',
+    title: shortName || t.radioFmLabel,
     artist: parsedUrl.hostname,
     cover: DEFAULT_COVER_IMAGE,
     src: normalizedUrl,
@@ -36,7 +39,7 @@ function buildRadioStreamResult(normalizedUrl: string, parsedUrl: URL): {
   };
   return {
     tracks: [track],
-    label: `RadioFM: ${parsedUrl.hostname}`,
+    label: shortName ? `${t.radioFmLabel}: ${shortName}` : t.radioFmLabel,
     normalizedUrl,
   };
 }
@@ -153,18 +156,18 @@ function parseM3uPlaylist(text: string, baseUrl: string): Track[] {
       const sameMirrorPath = Boolean(
         isRadioEntry && lastRadioPath && parsedEntry.pathname === lastRadioPath
       );
-      const entryTitle =
-        pendingTitle ||
-        (isRadioEntry
-          ? (sameMirrorPath && lastRadioTitle) || 'RadioFM'
-          : titleFromUrl(resolved, tracks.length));
+      const entryTitle = isRadioEntry
+        ? extractShortRadioName(resolved, pendingTitle) ||
+          (sameMirrorPath && lastRadioTitle) ||
+          'RadioFM'
+        : pendingTitle || titleFromUrl(resolved, tracks.length);
       const entryArtist =
         pendingArtist ||
         (isRadioEntry && sameMirrorPath && lastRadioArtist) ||
         parsedEntry.hostname;
 
       if (isRadioEntry) {
-        if (pendingTitle) lastRadioTitle = pendingTitle;
+        if (entryTitle && entryTitle !== 'RadioFM') lastRadioTitle = entryTitle;
         if (pendingArtist) lastRadioArtist = pendingArtist;
         lastRadioPath = parsedEntry.pathname;
       } else {
@@ -214,9 +217,10 @@ function parsePlsPlaylist(text: string, baseUrl: string): Track[] {
     if (!entry.file) continue;
     try {
       const resolved = upgradeInsecureUrlIfNeeded(new URL(entry.file, baseUrl).toString(), baseUrl);
+      const shortName = extractShortRadioName(resolved, entry.title);
       tracks.push({
         id: `url-pls-${tracks.length}-${resolved}`,
-        title: entry.title || 'RadioFM',
+        title: shortName || 'RadioFM',
         artist: host,
         cover: DEFAULT_COVER_IMAGE,
         src: resolved,
@@ -455,7 +459,7 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
       const isRadioLine = isLikelyDirectAudioStreamUrl(parsedLine);
       return {
         id: `url-direct-${idx}-${safeLine}`,
-        title: isRadioLine ? 'RadioFM' : titleFromUrl(safeLine, idx),
+        title: isRadioLine ? (extractShortRadioName(safeLine) || t.radioFmLabel) : titleFromUrl(safeLine, idx),
         artist: parsedLine.hostname,
         cover: DEFAULT_COVER_IMAGE,
         src: safeLine,
@@ -513,9 +517,10 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
   if (AUDIO_EXT_RE.test(parsedUrl.pathname) || VIDEO_EXT_RE.test(parsedUrl.pathname)) {
     const isVideo = VIDEO_EXT_RE.test(parsedUrl.pathname);
     const isRadioFile = !isVideo && RADIO_HOST_RE.test(parsedUrl.hostname);
+    const radioShort = isRadioFile ? extractShortRadioName(normalizedUrl) : '';
     const track: Track = {
       id: `url-file-${normalizedUrl}`,
-      title: isRadioFile ? 'RadioFM' : titleFromUrl(normalizedUrl, 0),
+      title: isRadioFile ? (radioShort || t.radioFmLabel) : titleFromUrl(normalizedUrl, 0),
       artist: parsedUrl.hostname,
       cover: DEFAULT_COVER_IMAGE,
       src: normalizedUrl,
@@ -525,7 +530,7 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
     };
     return {
       tracks: [track],
-      label: isRadioFile ? `RadioFM: ${parsedUrl.hostname}` : track.title,
+      label: isRadioFile ? (radioShort ? `${t.radioFmLabel}: ${radioShort}` : t.radioFmLabel) : track.title,
       normalizedUrl,
     };
   }
@@ -622,9 +627,10 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
   if (!isPlaylistDoc && (contentType.startsWith('audio/') || contentType.startsWith('video/'))) {
     void res.body?.cancel?.().catch(() => {});
     const isAudioRadio = contentType.startsWith('audio/');
+    const radioShort = isAudioRadio ? extractShortRadioName(normalizedUrl) : '';
     const track: Track = {
       id: `url-stream-${normalizedUrl}`,
-      title: isAudioRadio ? 'RadioFM' : titleFromUrl(normalizedUrl, 0),
+      title: isAudioRadio ? (radioShort || t.radioFmLabel) : titleFromUrl(normalizedUrl, 0),
       artist: parsedUrl.hostname,
       cover: DEFAULT_COVER_IMAGE,
       src: normalizedUrl,
@@ -632,7 +638,13 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
       mediaType: isAudioRadio ? 'audio' : 'video',
       isRadio: isAudioRadio,
     };
-    return { tracks: [track], label: isAudioRadio ? 'RadioFM' : track.title, normalizedUrl };
+    return {
+      tracks: [track],
+      label: isAudioRadio
+        ? (radioShort ? `${t.radioFmLabel}: ${radioShort}` : t.radioFmLabel)
+        : track.title,
+      normalizedUrl,
+    };
   }
 
   const bodyText = await res.text();
@@ -655,7 +667,12 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
     if (tracks.length === 0) {
       throw new Error(t.errM3uNoTracks);
     }
-    return { tracks, label: `RadioFM: ${parsedUrl.hostname}`, normalizedUrl };
+    const shortPls = extractShortRadioName(normalizedUrl, tracks[0]?.title);
+    return {
+      tracks,
+      label: shortPls ? `${t.radioFmLabel}: ${shortPls}` : t.radioFmLabel,
+      normalizedUrl,
+    };
   }
 
   if (
@@ -668,10 +685,10 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
       throw new Error(t.errM3uNoTracks);
     }
     const allRadio = tracks.every((tr) => tr.isRadio);
-    const radioLabel =
-      allRadio && tracks[0]?.title && tracks[0].title !== 'RadioFM'
-        ? `RadioFM: ${tracks[0].title}`
-        : `${t.playlistTitle}: ${parsedUrl.hostname}`;
+    const shortM3u = allRadio ? extractShortRadioName(normalizedUrl, tracks[0]?.title) : '';
+    const radioLabel = allRadio
+      ? (shortM3u ? `${t.radioFmLabel}: ${shortM3u}` : t.radioFmLabel)
+      : `${t.playlistTitle}: ${parsedUrl.hostname}`;
     return { tracks, label: radioLabel, normalizedUrl };
   }
 

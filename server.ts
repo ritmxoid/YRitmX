@@ -1,5 +1,6 @@
 import dns from 'node:dns/promises';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -139,6 +140,7 @@ async function fetchWithSafeRedirects(
 async function startServer() {
   const app = express();
   app.disable('x-powered-by');
+  const httpServer = http.createServer(app);
 
   // Same-origin playlist text proxy (for M3U / PLS / RSS / JSON blocked by CORS)
   app.get('/api/playlist-proxy', async (req: Request, res: Response) => {
@@ -340,13 +342,18 @@ async function startServer() {
   } else {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        allowedHosts: true,
+        ws: { server: httpServer },
+        hmr: process.env.DISABLE_HMR === 'true' ? false : true,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`YRitmX server listening on http://0.0.0.0:${PORT}`);
   });
 }

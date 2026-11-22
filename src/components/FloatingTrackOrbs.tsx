@@ -1,5 +1,6 @@
 import { Pause, Play } from 'lucide-react';
-import { MutableRefObject, useEffect, useId, useMemo, useRef } from 'react';
+import { MutableRefObject, useId, useLayoutEffect, useMemo, useRef } from 'react';
+import { extractShortRadioName } from '../constants/radioStations';
 import { DEFAULT_COVER_IMAGE } from '../constants/visualizer';
 import { useI18n } from '../i18n/I18nContext';
 import { Track } from '../types/audio';
@@ -177,10 +178,34 @@ export function FloatingTrackOrbs({
       (window.innerWidth < 768 || Math.min(window.innerWidth, window.innerHeight) < 560);
     const activeSize = isMobile ? 96 : 116;
 
+    const formatOrbTrack = (tr: Track): Track => {
+      const isRadioTrack = Boolean(
+        tr.isRadio || tr.sourceName === 'RadioFM' || tr.sourceName === t.radioFmLabel
+      );
+      if (!isRadioTrack) return tr;
+      const cleanedTitle = (tr.title || '')
+        .replace(/^(?:RadioFM|РадиоФМ|РадіоФМ)\s*[:-]\s*/i, '')
+        .replace(/\s*[-–]\s*(?:RadioFM|РадиоФМ|РадіоФМ)$/i, '')
+        .trim();
+      const hasSpecificTitle =
+        Boolean(cleanedTitle) && !/^(?:radio\s*fm|радио\s*фм|радіо\s*фм)$/i.test(cleanedTitle);
+      const shortName = hasSpecificTitle
+        ? cleanedTitle
+        : extractShortRadioName(tr.src || '', tr.artist);
+      return {
+        ...tr,
+        title: shortName ? `${shortName} - ${t.radioFmLabel}` : t.radioFmLabel,
+      };
+    };
+
     const trackStyle = pickTrackOrbStyle();
     const isSingleRadio =
       tracks.length === 1 &&
-      Boolean(activeTrack.isRadio || activeTrack.sourceName === 'RadioFM');
+      Boolean(
+        activeTrack.isRadio ||
+          activeTrack.sourceName === 'RadioFM' ||
+          activeTrack.sourceName === t.radioFmLabel
+      );
     const totalOrbs = 1 + selectedCompanions.length;
     const shapedSlot = Math.floor(Math.random() * totalOrbs);
     const activeShape: OrbShape = isSingleRadio
@@ -188,9 +213,7 @@ export function FloatingTrackOrbs({
       : shapedSlot === 0
       ? trackStyle.shape
       : 'circle';
-    const orbTrack = isSingleRadio
-      ? { ...activeTrack, title: 'RadioFM' }
-      : activeTrack;
+    const orbTrack = formatOrbTrack(activeTrack);
 
     return [
       {
@@ -209,7 +232,7 @@ export function FloatingTrackOrbs({
         const compStyle = pickCompanionOrbStyle(trackStyle.fxMode, compShape, idx);
         const finalShape: OrbShape = compShape;
         return {
-          track: item.track,
+          track: formatOrbTrack(item.track),
           indexInPlaylist: item.indexInPlaylist,
           isActive: false,
           size: (isMobile ? 64 : 76) + (idx % 3) * 10,
@@ -222,10 +245,13 @@ export function FloatingTrackOrbs({
         };
       }),
     ];
-  }, [tracks, currentIndex]);
+  }, [tracks, currentIndex, t.radioFmLabel]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (orbSpecs.length === 0) return;
+    orbRefs.current.length = orbSpecs.length;
+    coverRefs.current.length = orbSpecs.length;
+    hoverTextRefs.current.length = orbSpecs.length;
 
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const fxCanvas = fxCanvasRef.current;
@@ -350,13 +376,23 @@ export function FloatingTrackOrbs({
     let breathProgress = 0;
     let breathCooldown = 140 + Math.floor(Math.random() * 140);
 
-    const tick = () => {
-      animId = requestAnimationFrame(tick);
-      frameCounter += 1;
+    const runFrame = (advancePhysics: boolean) => {
+      if (advancePhysics) {
+        frameCounter += 1;
+      }
 
       if (window.innerWidth !== width || window.innerHeight !== height) {
         resizeFxCanvas();
       }
+
+      const mountFade = !advancePhysics
+        ? 0
+        : prefersReducedMotion
+        ? 1
+        : (() => {
+            const p = Math.min(1, frameCounter / 14);
+            return p * p * (3 - 2 * p);
+          })();
 
       const {
         analyser: activeAnalyser,
@@ -477,7 +513,8 @@ export function FloatingTrackOrbs({
       const sparkCountOrb =
         energyNorm < 0.2 ? 2 : Math.max(2, Math.round((3 + intenseBoost * 11) * fxFactor));
 
-      for (let i = 0; i < physics.length; i++) {
+      if (advancePhysics) {
+        for (let i = 0; i < physics.length; i++) {
         const p = physics[i];
         p.phase +=
           (prefersReducedMotion ? 0.008 : 0.011) +
@@ -729,6 +766,7 @@ export function FloatingTrackOrbs({
           }
         }
       }
+      } // end if (advancePhysics)
 
       // Precompute orb visual scale/opacity/deform so contour FX & DOM stay frame-locked
       const orbRenderStates = physics.map((p) => {
@@ -784,8 +822,10 @@ export function FloatingTrackOrbs({
       // Draw gentle collision sparks, ripples, and per-orb 13-mode audio-reactive effects
       if (fxCtx) {
         fxCtx.clearRect(0, 0, width, height);
-        fxCtx.save();
-        fxCtx.globalCompositeOperation = 'lighter';
+        if (mountFade > 0.01) {
+          fxCtx.save();
+          fxCtx.globalAlpha = mountFade;
+          fxCtx.globalCompositeOperation = 'lighter';
 
         const rotSpeedFactor = prefersReducedMotion ? 0.1 : 0.22;
         for (let i = 0; i < physics.length; i++) {
@@ -900,7 +940,8 @@ export function FloatingTrackOrbs({
           fxCtx.fill();
         }
 
-        fxCtx.restore();
+          fxCtx.restore();
+        }
       }
 
       // Apply GPU-composited transforms + subtle contour membrane shudder & synchronized shape rotation
@@ -954,12 +995,13 @@ export function FloatingTrackOrbs({
         const tx = p.x + tremorX;
         const ty = p.y + tremorY;
 
+        const effectiveOpacity = opacity * mountFade;
         el.style.transform =
           Math.abs(deform) > 0.0012
             ? `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) rotate(${deg.toFixed(1)}deg) scale(${sx.toFixed(3)}, ${sy.toFixed(3)}) rotate(${(-deg).toFixed(1)}deg)`
             : `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) scale(${baseScale.toFixed(3)})`;
-        el.style.opacity = opacity.toFixed(3);
-        el.style.pointerEvents = p.breathScale > 2.2 ? 'none' : 'auto';
+        el.style.opacity = effectiveOpacity.toFixed(3);
+        el.style.pointerEvents = p.breathScale > 2.2 || mountFade < 0.05 ? 'none' : 'auto';
         el.style.zIndex = p.breathScale > 2.2 ? '1' : p.isActive ? '3' : '2';
 
         if (coverEl) {
@@ -994,6 +1036,14 @@ export function FloatingTrackOrbs({
           el.style.borderColor = 'transparent';
         }
       }
+    };
+
+    // Position all orbs synchronously before first browser paint so they never flash at (0, 0)
+    runFrame(false);
+
+    const tick = () => {
+      animId = requestAnimationFrame(tick);
+      runFrame(true);
     };
 
     animId = requestAnimationFrame(tick);
@@ -1063,7 +1113,7 @@ export function FloatingTrackOrbs({
                 ? `${t.orbPlayTitle}: ${spec.track.title}`
                 : `${t.orbSwitchTitle} ${spec.track.title}`
             }
-            className={`fixed top-0 left-0 overflow-visible pointer-events-auto cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white will-change-transform ${
+            className={`fixed top-0 left-0 opacity-0 overflow-visible pointer-events-auto cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white will-change-transform ${
               spec.shape === 'circle' ? 'rounded-full border-2' : 'border-0'
             }`}
           >

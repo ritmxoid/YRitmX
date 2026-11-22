@@ -61,7 +61,9 @@ interface SourcesModalProps {
   cloudUser?: CloudUserInfo | null;
   isSavingToCloud?: boolean;
   onSaveToCloud?: (tab: SourceTab) => void;
-  onSignInGoogleCloud?: (saveAfterTab?: SourceTab) => Promise<boolean>;
+  onSignInGoogleCloud?: (
+    saveAfterTab?: SourceTab
+  ) => Promise<{ ok: boolean; errorMsg?: string } | boolean>;
   onSignInEmailCloud?: (
     email: string,
     password: string,
@@ -175,10 +177,13 @@ export function SourcesModal({
     setAuthBusy(true);
     setAuthError(null);
     try {
-      const ok = await onSignInGoogleCloud(pendingSaveTab);
+      const res = await onSignInGoogleCloud(pendingSaveTab);
+      const ok = typeof res === 'boolean' ? res : res.ok;
       if (ok) {
         setIsAuthDialogOpen(false);
         setPendingSaveTab(undefined);
+      } else if (typeof res === 'object' && res.errorMsg) {
+        setAuthError(res.errorMsg);
       }
     } finally {
       setAuthBusy(false);

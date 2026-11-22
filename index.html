@@ -21,22 +21,132 @@
     <meta name="x5-fullscreen" content="true" />
     <meta name="browsermode" content="application" />
     <meta name="app-version" content="2.0" />
-    <title>YRitmX — Reactive Audio Visualizer &amp; Player</title>
-    <meta name="description" content="YRitmX — реактивный аудиовизуализатор и плеер с поддержкой Audius, локальных MP3 с обложками, 5-полосного эквалайзера и 8 режимов визуализации." />
-    <meta property="og:title" content="YRitmX — Reactive Audio Visualizer &amp; Player" />
-    <meta property="og:description" content="Реактивный аудиовизуализатор и плеер с поддержкой Audius, локальных MP3 и 5-полосного эквалайзера." />
+    <title>YRitmX — Reactive Audio Visualizer &amp; Music Player</title>
+    <meta name="description" content="YRitmX — реактивный аудиовизуализатор и веб-плеер: 28 режимов визуализации, плавающие сферы, Audius, FM-радио, эквалайзер и запись MP4." />
+    <meta name="keywords" content="YRitmX, audio visualizer, music player, Web Audio API, reactive visuals, floating orbs, online FM radio, Audius player, MP3 player with cover art, 5-band equalizer, MP4 music video studio, аудиовизуализатор, музыкальный плеер онлайн, парящие сферы" />
+    <meta name="author" content="YRitmX" />
+    <meta name="application-name" content="YRitmX" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="googlebot" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+
+    <!-- OpenGraph -->
+    <meta property="og:site_name" content="YRitmX" />
+    <meta property="og:title" content="YRitmX — Reactive Audio Visualizer &amp; Music Player" />
+    <meta property="og:description" content="Реактивный аудиовизуализатор и плеер с 28 визуализаторами, бескнопочным режимом парящих сфер, Audius, локальными папками, 10 FM-станциями, эквалайзером и студийной записью MP4." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://yritmx.pages.dev/" />
     <meta property="og:image" content="https://yritmx.pages.dev/pwa-512x512.png" />
+    <meta property="og:image:alt" content="YRitmX Reactive Audio Visualizer &amp; Music Player" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta property="og:locale:alternate" content="uk_UA" />
+    <meta property="og:locale:alternate" content="es_ES" />
+    <meta property="og:locale:alternate" content="fr_FR" />
+    <meta property="og:locale:alternate" content="de_DE" />
+    <meta property="og:locale:alternate" content="ja_JP" />
+    <meta property="og:locale:alternate" content="zh_CN" />
+
+    <!-- Twitter / X -->
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="YRitmX — Reactive Audio Visualizer &amp; Music Player" />
+    <meta name="twitter:description" content="28 аудиореактивных визуализаторов, плавающие сферы, Audius, локальные MP3/FLAC/видео, 10 FM-радиостанций, 5-полосный эквалайзер и запись клипов в MP4." />
+    <meta name="twitter:url" content="https://yritmx.pages.dev/" />
     <meta name="twitter:image" content="https://yritmx.pages.dev/pwa-512x512.png" />
+
     <link rel="canonical" href="https://yritmx.pages.dev/" />
+    <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml" />
+    <link rel="alternate" type="text/plain" title="LLMs.txt" href="/llms.txt" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="shortcut icon" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+    <!-- Schema.org Structured Data (SEO & AI Discovery) -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://yritmx.pages.dev/#website",
+            "url": "https://yritmx.pages.dev/",
+            "name": "YRitmX",
+            "description": "Реактивный аудиовизуализатор, веб-плеер, FM-радио и студия записи музыкальных клипов прямо в браузере.",
+            "inLanguage": ["ru", "en", "uk", "es", "fr", "de", "it", "pt", "zh", "ja", "ko", "tr", "pl", "ar", "hi", "uz", "kk"]
+          },
+          {
+            "@type": "WebApplication",
+            "@id": "https://yritmx.pages.dev/#webapp",
+            "name": "YRitmX",
+            "alternateName": "YRitmX Reactive Audio Visualizer & Player",
+            "url": "https://yritmx.pages.dev/",
+            "image": "https://yritmx.pages.dev/pwa-512x512.png",
+            "screenshot": "https://yritmx.pages.dev/pwa-512x512.png",
+            "applicationCategory": "MultimediaApplication",
+            "applicationSubCategory": "Audio Visualizer, Online FM Radio Player, Web Music Player, Music Video Studio",
+            "operatingSystem": "All (Windows, macOS, Linux, Android, iOS, PWA)",
+            "browserRequirements": "Requires HTML5 Web Audio API and HTML5 Canvas",
+            "isAccessibleForFree": true,
+            "inLanguage": ["ru", "en", "uk", "es", "fr", "de", "it", "pt", "zh", "ja", "ko", "tr", "pl", "ar", "hi", "uz", "kk"],
+            "description": "YRitmX — многофункциональный аудиореактивный визуализатор и музыкальный плеер (PWA) с 28 визуализаторами, многослойным микшированием и Visual DNA, бескнопочным режимом парящих сфер (Floating Track Orbs), поддержкой Audius, локальных папок с аудио/видео/фото и ID3-обложками, универсальным загрузчиком URL/.m3u/.pls/RSS/GitHub/Archive.org, 10 встроенными FM-радиостанциями, 5-полосным эквалайзером, облачной синхронизацией и записью видео в MP4/WebM.",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            },
+            "featureList": [
+              "28 аудиореактивных визуализаторов в реальном времени (Live Aura, Spectral Waves, Kaleidoscope, Galactic Nebula, Synthwave Horizon, Supernova Flash и др.)",
+              "Автокарусель визуализаций (5–30 сек), многослойный режим Mix Layers и генератор Visual DNA + 8 цветовых палитр",
+              "Бескнопочный Zen-режим с парящими сферами треков (Floating Track Orbs): 14 форм и 18 реактивных Canvas-эффектов с физикой столкновений и искрами",
+              "Мерцающая кнопка FM для последовательного переключения 10 встроенных жанровых радиостанций (Pop, Country, Dance, Electronic, Classical, Indie, Work, Relax, Soft Rock, Jazz)",
+              "Децентрализованный стриминг Audius с поиском артистов и треков",
+              "Локальная папка устройства: MP3, WAV, FLAC, OGG, M4A, AAC, видео (MP4, WebM, MOV) и фото-слайдшоу с извлечением ID3-обложек",
+              "Универсальный загрузчик URL: прямые потоки, .m3u/.pls плейлисты, RSS-подкасты, репозитории GitHub и коллекции Archive.org со встроенным прокси для радио",
+              "5-полосный параметрический эквалайзер (60 Hz — 14 kHz) и 5 пресетов (Flat, Bass Boost, Electronic, Vocal, Night)",
+              "Студия записи и Stage Media: загрузка своих фото/видео на фон или рамку, наложение живой камеры, физика движения обложки и экспорт видеоклипа в MP4/WebM",
+              "Облачная синхронизация профилей (Email/Пароль и Google) между вкладками Audius, URL и Папка",
+              "Поддержка офлайн-установки как PWA и интерфейс на 17 языках"
+            ],
+            "potentialAction": {
+              "@type": "UseAction",
+              "target": "https://yritmx.pages.dev/"
+            }
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://yritmx.pages.dev/#faq",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Какие источники музыки и медиа поддерживает YRitmX?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "YRitmX воспроизводит 10 встроенных FM-радиостанций (переключаемых кнопкой FM), треки из Audius, локальные папки с аудио (MP3, FLAC, WAV, OGG, M4A, AAC), видео и фото с ID3-обложками, а также внешние ссылки, плейлисты .m3u/.pls, RSS-подкасты, аудиофайлы из GitHub и Archive.org."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Как работает режим парящих сфер (Floating Track Orbs)?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "При скрытии панели интерфейса в Zen-режиме обложки треков превращаются в 2–5 светящихся сфер или геометрических фигур (14 форм и 18 реактивных эффектов), которые мягко летят, сталкиваются со вспышками и искрами в такт басу и позволяют переключать или ставить треки на паузу одним касанием."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Можно ли записать музыкальный видеоклип прямо в YRitmX?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Да. Встроенный студийный режим позволяет выбрать свой фото- или видеофон, включить наложение камеры и кинематику обложки, смикшировать звук и записать готовую аудиореактивную визуализацию со сферами прямо в файл MP4 или WebM."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
   </head>
   <body class="bg-[#0a0a0c] text-gray-100 antialiased selection:bg-purple-500 selection:text-white">
     <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-W9N5PB7C" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>

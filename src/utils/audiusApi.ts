@@ -65,14 +65,18 @@ const RITMXOID_DEFAULT_LANG_CODES = new Set([
   'ro', // Romanian (including ro-MD Moldovan)
 ]);
 
-export function getDefaultAudiusHandleForBrowser(): string {
-  if (typeof navigator === 'undefined') return DEFAULT_AUDIUS_HANDLE;
+export function isRitmxoidDefaultBrowserLang(): boolean {
+  if (typeof navigator === 'undefined') return true;
   const primaryRaw =
     (navigator.languages && navigator.languages.length > 0
       ? navigator.languages[0]
       : navigator.language) || '';
   const base = primaryRaw.toLowerCase().trim().split(/[-_]/)[0] || '';
-  return RITMXOID_DEFAULT_LANG_CODES.has(base)
+  return RITMXOID_DEFAULT_LANG_CODES.has(base);
+}
+
+export function getDefaultAudiusHandleForBrowser(): string {
+  return isRitmxoidDefaultBrowserLang()
     ? DEFAULT_AUDIUS_HANDLE
     : INTERNATIONAL_AUDIUS_HANDLE;
 }

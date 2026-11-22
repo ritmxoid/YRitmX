@@ -163,6 +163,7 @@ export interface Translations {
   // Floating Orbs
   orbPlayTitle: string;
   orbSwitchTitle: string;
+  radioFmLabel: string;
 
   // Visualizers & Palettes
   vizModes: string[];
@@ -376,6 +377,7 @@ const en: Translations = {
 
   orbPlayTitle: 'Play / Pause',
   orbSwitchTitle: 'Switch to',
+  radioFmLabel: 'RadioFM',
 
   vizModes: [
     '1. Living Aura (Bass)',
@@ -624,6 +626,7 @@ const ru: Translations = {
 
   orbPlayTitle: 'Пауза / Воспроизвести',
   orbSwitchTitle: 'Включить трек',
+  radioFmLabel: 'РадиоФМ',
 
   vizModes: [
     '1. Живая Аура (Бас)',
@@ -872,6 +875,7 @@ const uk: Translations = {
 
   orbPlayTitle: 'Пауза / Відтворити',
   orbSwitchTitle: 'Увімкнути трек',
+  radioFmLabel: 'РадіоФМ',
 
   vizModes: [
     '1. Жива Аура (Бас)',
@@ -1120,6 +1124,7 @@ const es: Translations = {
 
   orbPlayTitle: 'Reproducir / Pausar',
   orbSwitchTitle: 'Cambiar a',
+  radioFmLabel: 'RadioFM',
 
   vizModes: [
     '1. Aura Viva (Graves)',
@@ -1368,6 +1373,7 @@ const fr: Translations = {
 
   orbPlayTitle: 'Lire / Pause',
   orbSwitchTitle: 'Passer à',
+  radioFmLabel: 'RadioFM',
 
   vizModes: [
     '1. Aura Vivante (Basses)',
@@ -1616,6 +1622,7 @@ const de: Translations = {
 
   orbPlayTitle: 'Abspielen / Pause',
   orbSwitchTitle: 'Wechseln zu',
+  radioFmLabel: 'RadioFM',
 
   vizModes: [
     '1. Lebendige Aura (Bass)',
@@ -1864,6 +1871,7 @@ const it: Translations = {
 
   orbPlayTitle: 'Riproduci / Pausa',
   orbSwitchTitle: 'Passa a',
+  radioFmLabel: 'RadioFM',
 
   vizModes: [
     '1. Aura Viva (Bassi)',
@@ -2112,6 +2120,7 @@ const pt: Translations = {
 
   orbPlayTitle: 'Reproduzir / Pausar',
   orbSwitchTitle: 'Ir para',
+  radioFmLabel: 'RadioFM',
 
   vizModes: [
     '1. Aura Viva (Graves)',
@@ -2360,6 +2369,7 @@ const zh: Translations = {
 
   orbPlayTitle: '播放 / 暂停',
   orbSwitchTitle: '切换到',
+  radioFmLabel: 'RadioFM',
 
   vizModes: [
     '1. 律动光环（低音）',
@@ -2608,6 +2618,7 @@ const ja: Translations = {
 
   orbPlayTitle: '再生 / 一時停止',
   orbSwitchTitle: '切り替え：',
+  radioFmLabel: 'RadioFM',
 
   vizModes: [
     '1. リビングオーラ（低音）',
@@ -2856,6 +2867,7 @@ const ko: Translations = {
 
   orbPlayTitle: '재생 / 일시정지',
   orbSwitchTitle: '트랙 전환:',
+  radioFmLabel: 'RadioFM',
 
   vizModes: [
     '1. 살아있는 오라 (베이스)',
@@ -3104,6 +3116,7 @@ const tr: Translations = {
 
   orbPlayTitle: 'Oynat / Duraklat',
   orbSwitchTitle: 'Geçiş yap:',
+  radioFmLabel: 'RadioFM',
 
   vizModes: [
     '1. Canlı Aura (Bas)',
@@ -3352,6 +3365,7 @@ const pl: Translations = {
 
   orbPlayTitle: 'Odtwórz / Pauza',
   orbSwitchTitle: 'Przełącz na',
+  radioFmLabel: 'RadioFM',
 
   vizModes: [
     '1. Żywa Aura (Bas)',
@@ -3600,6 +3614,7 @@ const ar: Translations = {
 
   orbPlayTitle: 'تشغيل / إيقاف مؤقت',
   orbSwitchTitle: 'الانتقال إلى',
+  radioFmLabel: 'RadioFM',
 
   vizModes: [
     '1. هالة حية (جهير)',
@@ -3848,6 +3863,7 @@ const hi: Translations = {
 
   orbPlayTitle: 'चलाएं / रोकें',
   orbSwitchTitle: 'इस पर जाएं',
+  radioFmLabel: 'RadioFM',
 
   vizModes: [
     '1. जीवंत आभा (बेस)',
@@ -4096,6 +4112,7 @@ const uz: Translations = {
 
   orbPlayTitle: 'Ijro / Pauza',
   orbSwitchTitle: 'Trekni yoqish',
+  radioFmLabel: 'RadioFM',
 
   vizModes: [
     '1. Jonli Aura (Bas)',
@@ -4344,6 +4361,7 @@ const kk: Translations = {
 
   orbPlayTitle: 'Ойнату / Кідірту',
   orbSwitchTitle: 'Трекке өту',
+  radioFmLabel: 'РадиоФМ',
 
   vizModes: [
     '1. Тірі Аура (Бас)',

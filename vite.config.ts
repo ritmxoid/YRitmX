@@ -18,6 +18,9 @@ export default defineConfig(() => {
           'pwa-192x192.png',
           'pwa-512x512.png',
           'pwa-maskable-512x512.png',
+          'llms.txt',
+          'robots.txt',
+          'sitemap.xml',
         ],
         manifest: {
           id: '/',
@@ -59,7 +62,7 @@ export default defineConfig(() => {
           skipWaiting: true,
           clientsClaim: true,
           navigateFallback: 'index.html',
-          navigateFallbackDenylist: [/^\/api\//],
+          navigateFallbackDenylist: [/^\/api\//, /^\/(?:llms\.txt|robots\.txt|sitemap\.xml)$/],
           globPatterns: ['**/*.{js,css,html,ico,png,jpg,jpeg,webp,svg,woff,woff2}'],
           maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
           runtimeCaching: [
