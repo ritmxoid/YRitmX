@@ -81,6 +81,12 @@ export function getDefaultAudiusHandleForBrowser(): string {
     : INTERNATIONAL_AUDIUS_HANDLE;
 }
 
+export function getDefaultAudiusProfilesForBrowser(): string[] {
+  return isRitmxoidDefaultBrowserLang()
+    ? [DEFAULT_AUDIUS_HANDLE, INTERNATIONAL_AUDIUS_HANDLE]
+    : [INTERNATIONAL_AUDIUS_HANDLE, DEFAULT_AUDIUS_HANDLE];
+}
+
 export function extractAudiusHandle(rawInput: string): string {
   const trimmed = rawInput.trim();
   if (!trimmed) return '';

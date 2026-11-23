@@ -112,6 +112,8 @@ import {
   DEFAULT_AUDIUS_HANDLE,
   fetchAudiusProfileTracks,
   getDefaultAudiusHandleForBrowser,
+  getDefaultAudiusProfilesForBrowser,
+  INTERNATIONAL_AUDIUS_HANDLE,
 } from './utils/audiusApi';
 import { createDemoTracks } from './utils/demoAudioGenerator';
 import {
@@ -156,6 +158,8 @@ const STORAGE_RECORD_RENDER_MODE_KEY = 'yritmx_record_render_mode';
 const STORAGE_CAROUSEL_MODE_KEY = 'yritmx_carousel_mode';
 const STORAGE_CAROUSEL_INTERVAL_KEY = 'yritmx_carousel_interval_sec';
 const STORAGE_MANUAL_AUDIUS_KEY = 'yritmx_manual_audius';
+const STORAGE_DEFAULT_AUDIUS_BOTH_SEEDED_KEY = 'yritmx_audius_both_v1';
+const STORAGE_DELETED_AUDIUS_DEFAULTS_KEY = 'yritmx_deleted_audius_defaults';
 const IMAGE_SLIDE_DURATION_SEC = 5;
 
 function shuffleTracksArray<T>(items: T[]): T[] {
@@ -191,32 +195,112 @@ function isManualAudiusSelection(): boolean {
   }
 }
 
+function getDeletedDefaultAudiusHandles(): Set<string> {
+  try {
+    const raw = localStorage.getItem(STORAGE_DELETED_AUDIUS_DEFAULTS_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(
+      parsed
+        .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+        .map((x) => x.trim().toLowerCase())
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function setDeletedDefaultAudiusHandles(handles: Set<string>): void {
+  try {
+    localStorage.setItem(STORAGE_DELETED_AUDIUS_DEFAULTS_KEY, JSON.stringify(Array.from(handles)));
+  } catch {
+    // ignore
+  }
+}
+
+function isDefaultAudiusHandle(handle: string): boolean {
+  const lower = handle.trim().toLowerCase();
+  return (
+    lower === DEFAULT_AUDIUS_HANDLE.toLowerCase() ||
+    lower === INTERNATIONAL_AUDIUS_HANDLE.toLowerCase()
+  );
+}
+
 function getInitialProfiles(): string[] {
-  const browserDefault = getDefaultAudiusHandleForBrowser();
+  const orderedDefaults = getDefaultAudiusProfilesForBrowser();
+  const deletedDefaults = getDeletedDefaultAudiusHandles();
+  const activeDefaults = orderedDefaults.filter((h) => !deletedDefaults.has(h.toLowerCase()));
+
   try {
     const raw = localStorage.getItem(STORAGE_PROFILES_KEY);
-    if (raw === null) return [browserDefault];
+    const bothSeeded = localStorage.getItem(STORAGE_DEFAULT_AUDIUS_BOTH_SEEDED_KEY) === '1';
+    if (raw === null) {
+      try {
+        localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(activeDefaults));
+        localStorage.setItem(STORAGE_DEFAULT_AUDIUS_BOTH_SEEDED_KEY, '1');
+      } catch {
+        // ignore
+      }
+      return activeDefaults;
+    }
+
     const parsed = JSON.parse(raw) as unknown;
     if (Array.isArray(parsed)) {
       let cleaned = parsed
         .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
         .map((x) => (x.toLowerCase() === 'ritmixoid' ? DEFAULT_AUDIUS_HANDLE : x));
+
       if (!isManualAudiusSelection()) {
         cleaned = cleaned.filter((x) => x.toLowerCase() !== 'nowellasarah');
-        if (!cleaned.some((x) => x.toLowerCase() === browserDefault.toLowerCase())) {
-          cleaned = [browserDefault, ...cleaned];
+      }
+
+      if (!bothSeeded) {
+        for (const defHandle of activeDefaults) {
+          if (!cleaned.some((x) => x.toLowerCase() === defHandle.toLowerCase())) {
+            cleaned = [...cleaned, defHandle];
+          }
+        }
+        if (!isManualAudiusSelection()) {
+          const primary = orderedDefaults[0];
+          if (!deletedDefaults.has(primary.toLowerCase())) {
+            cleaned = [
+              primary,
+              ...cleaned.filter((x) => x.toLowerCase() !== primary.toLowerCase()),
+            ];
+          }
         }
       }
-      return Array.from(new Set(cleaned));
+
+      const deduped: string[] = [];
+      const seenLower = new Set<string>();
+      for (const item of cleaned) {
+        const lower = item.toLowerCase();
+        if (!seenLower.has(lower)) {
+          seenLower.add(lower);
+          deduped.push(item);
+        }
+      }
+
+      try {
+        localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(deduped));
+        localStorage.setItem(STORAGE_DEFAULT_AUDIUS_BOTH_SEEDED_KEY, '1');
+      } catch {
+        // ignore
+      }
+      return deduped;
     }
   } catch {
     // ignore storage errors
   }
-  return [browserDefault];
+  return activeDefaults;
 }
 
 function getInitialHandle(): string {
-  const browserDefault = getDefaultAudiusHandleForBrowser();
+  const orderedDefaults = getDefaultAudiusProfilesForBrowser();
+  const deletedDefaults = getDeletedDefaultAudiusHandles();
+  const browserDefault =
+    orderedDefaults.find((h) => !deletedDefaults.has(h.toLowerCase())) ?? orderedDefaults[0];
   try {
     const raw = localStorage.getItem(STORAGE_HANDLE_KEY);
     if (!raw) return browserDefault;
@@ -347,6 +431,7 @@ export default function App() {
     triggered: boolean;
   } | null>(null);
   const coverSwipeHandledRef = useRef(false);
+  const coverSwipeResetTimerRef = useRef(0);
   const stageSwipeStartRef = useRef<{
     x: number;
     y: number;
@@ -354,6 +439,7 @@ export default function App() {
     triggered: boolean;
   } | null>(null);
   const stageSwipeHandledRef = useRef(false);
+  const stageSwipeResetTimerRef = useRef(0);
   const isRecordingRef = useRef(false);
   const objectUrlsRef = useRef<string[]>([]);
   const folderCacheRef = useRef<Map<string, Track[]>>(new Map());
@@ -387,6 +473,10 @@ export default function App() {
   const fmFlyoutTimerRef = useRef(0);
 
   const [fmFlyout, setFmFlyout] = useState<{ id: number; label: string } | null>(null);
+  const [radioNowPlaying, setRadioNowPlaying] = useState<{ title: string; artist: string } | null>(
+    null
+  );
+  const [radioDisplayCycle, setRadioDisplayCycle] = useState<'station' | 'track'>('station');
   const [usingDirectAudioFallback, setUsingDirectAudioFallback] = useState(false);
   const [isStudioMode, setIsStudioMode] = useState(false);
   const [isRecordArmed, setIsRecordArmed] = useState(false);
@@ -1303,6 +1393,105 @@ export default function App() {
 
   const currentTrack = playlist[currentIndex] ?? null;
 
+  // Poll live song & artist metadata (ICY StreamTitle) while an online radio stream plays
+  useEffect(() => {
+    const rawSrc = currentTrack?.src || '';
+    if (!currentTrack?.isRadio || !rawSrc) {
+      setRadioNowPlaying(null);
+      setRadioDisplayCycle('station');
+      return;
+    }
+
+    setRadioNowPlaying(null);
+    setRadioDisplayCycle('station');
+
+    if (!isOnline || !isPlaying) {
+      return;
+    }
+
+    let targetUrl = rawSrc;
+    if (rawSrc.startsWith('/api/radio-proxy')) {
+      try {
+        const parsed = new URL(rawSrc, window.location.origin);
+        targetUrl = parsed.searchParams.get('url') || rawSrc;
+      } catch {
+        targetUrl = rawSrc;
+      }
+    }
+    if (!/^https?:\/\//i.test(targetUrl)) {
+      return;
+    }
+
+    let cancelled = false;
+    let activeAbort: AbortController | null = null;
+
+    const fetchNowPlaying = async () => {
+      activeAbort?.abort();
+      const ctrl = new AbortController();
+      activeAbort = ctrl;
+      try {
+        const res = await fetch(
+          `/api/radio-metadata?url=${encodeURIComponent(targetUrl)}`,
+          { signal: ctrl.signal, cache: 'no-store' }
+        );
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as {
+          title?: string | null;
+          artist?: string | null;
+        };
+        if (cancelled) return;
+        const nextTitle = typeof data.title === 'string' ? data.title.trim() : '';
+        const nextArtist = typeof data.artist === 'string' ? data.artist.trim() : '';
+        if (nextTitle) {
+          setRadioNowPlaying((prev) => {
+            if (prev && prev.title === nextTitle && prev.artist === nextArtist) {
+              return prev;
+            }
+            return { title: nextTitle, artist: nextArtist };
+          });
+        } else {
+          setRadioNowPlaying(null);
+        }
+      } catch {
+        // Ignore transient or aborted metadata polls
+      }
+    };
+
+    void fetchNowPlaying();
+    const pollId = window.setInterval(() => {
+      void fetchNowPlaying();
+    }, 12000);
+
+    return () => {
+      cancelled = true;
+      activeAbort?.abort();
+      window.clearInterval(pollId);
+    };
+  }, [currentTrack?.isRadio, currentTrack?.src, isOnline, isPlaying]);
+
+  // Alternate between Station+Link and Song+Artist every 5 seconds when radio metadata is available
+  useEffect(() => {
+    if (!currentTrack?.isRadio || !radioNowPlaying?.title) {
+      setRadioDisplayCycle('station');
+      return;
+    }
+    setRadioDisplayCycle('track');
+    const intervalId = window.setInterval(() => {
+      setRadioDisplayCycle((prev) => (prev === 'station' ? 'track' : 'station'));
+    }, 5000);
+    return () => window.clearInterval(intervalId);
+  }, [currentTrack?.isRadio, currentTrack?.src, radioNowPlaying?.title, radioNowPlaying?.artist]);
+
+  const isShowingRadioNowPlaying = Boolean(
+    currentTrack?.isRadio && radioNowPlaying?.title && radioDisplayCycle === 'track'
+  );
+  const coverDisplayTitle = isShowingRadioNowPlaying
+    ? radioNowPlaying!.title
+    : currentTrack?.title;
+  const coverDisplayArtist = isShowingRadioNowPlaying
+    ? radioNowPlaying!.artist || currentTrack?.artist || t.radioFmLabel
+    : currentTrack?.artist;
+
   const filteredPlaylist = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return playlist;
@@ -1654,6 +1843,12 @@ export default function App() {
   }, [eqGains]);
 
   const saveProfileToHistory = useCallback((handle: string) => {
+    if (isDefaultAudiusHandle(handle)) {
+      const deleted = getDeletedDefaultAudiusHandles();
+      if (deleted.delete(handle.trim().toLowerCase())) {
+        setDeletedDefaultAudiusHandles(deleted);
+      }
+    }
     setSavedProfiles((prev) => {
       const exists = prev.some((p) => p.toLowerCase() === handle.toLowerCase());
       const next = exists ? prev : [...prev, handle];
@@ -1874,10 +2069,12 @@ export default function App() {
           .catch(() => {});
       }
     };
-    window.addEventListener('pointerdown', unlock, { once: true });
-    window.addEventListener('keydown', unlock, { once: true });
+    window.addEventListener('pointerup', unlock);
+    window.addEventListener('click', unlock);
+    window.addEventListener('keydown', unlock);
     return () => {
-      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('pointerup', unlock);
+      window.removeEventListener('click', unlock);
       window.removeEventListener('keydown', unlock);
     };
   }, [awaitingAutoplayUnlock, ensureAudioGraph, getActiveMediaElement, persistCurrentSession]);
@@ -1888,10 +2085,10 @@ export default function App() {
     const connectGraph = () => {
       ensureAudioGraph();
     };
-    window.addEventListener('pointerdown', connectGraph, { once: true });
+    window.addEventListener('pointerup', connectGraph, { once: true });
     window.addEventListener('keydown', connectGraph, { once: true });
     return () => {
-      window.removeEventListener('pointerdown', connectGraph);
+      window.removeEventListener('pointerup', connectGraph);
       window.removeEventListener('keydown', connectGraph);
     };
   }, [analyser, ensureAudioGraph, isPlaying]);
@@ -2677,15 +2874,52 @@ export default function App() {
   );
 
   const handleCycleFmStation = useCallback(async (step: 1 | -1 = 1) => {
-    const fmStations = getDefaultFmStationsForLang(lang);
+    const builtInStations = getDefaultFmStationsForLang(lang).map((station) => ({
+      key: station.key,
+      url: station.url,
+      urlId: `url-${hashString(station.url)}`,
+      label: getFmStationLabel(station, lang),
+      isCustom: false,
+    }));
+    const builtInUrlSet = new Set(builtInStations.map((s) => s.url));
+
+    const customStations = savedUrlsRef.current
+      .filter((entry) => {
+        if (!entry.url || findDefaultFmStationByUrl(entry.url) || builtInUrlSet.has(entry.url)) {
+          return false;
+        }
+        return /^(?:RadioFM|РадиоФМ|РадіоФМ)(?:\s*:\s*|$)/i.test(entry.label.trim());
+      })
+      .map((entry) => {
+        const strippedLabel = entry.label
+          .replace(/^(?:RadioFM|РадиоФМ|РадіоФМ)\s*:\s*/i, '')
+          .trim();
+        const shortName =
+          strippedLabel && !/^(?:RadioFM|РадиоФМ|РадіоФМ)$/i.test(strippedLabel)
+            ? strippedLabel
+            : extractShortRadioName(entry.url) || t.radioFmLabel;
+        return {
+          key: `custom-${entry.id}`,
+          url: entry.url,
+          urlId: entry.id,
+          label: shortName,
+          isCustom: true,
+        };
+      });
+
+    const fmStations = [...customStations, ...builtInStations];
     if (lastFmLangRef.current !== lang) {
       lastFmIndexRef.current = -1;
       lastFmLangRef.current = lang;
     }
+
     const activeTrackNow = playlistRef.current[currentIndexRef.current];
-    const currentMatchedIdx = activeTrackNow?.src
-      ? fmStations.findIndex((s) => s.url === activeTrackNow.src)
-      : -1;
+    const activeUrlNow = activeUrlIdRef.current;
+    const currentMatchedIdx = fmStations.findIndex(
+      (s) =>
+        (activeTrackNow?.src && s.url === activeTrackNow.src) ||
+        (activeUrlNow && s.urlId === activeUrlNow)
+    );
     const totalStations = fmStations.length;
     const nextIdx =
       currentMatchedIdx !== -1
@@ -2694,8 +2928,8 @@ export default function App() {
     lastFmIndexRef.current = nextIdx;
 
     const station = fmStations[nextIdx];
-    const stationLabel = getFmStationLabel(station, lang);
-    const urlId = `url-${hashString(station.url)}`;
+    const stationLabel = station.label;
+    const urlId = station.urlId;
 
     window.clearTimeout(fmFlyoutTimerRef.current);
     const flyId = ++fmFlyoutSeqRef.current;
@@ -2711,7 +2945,7 @@ export default function App() {
       // ignore
     }
 
-    const radioTrack: Track = {
+    let radioTrack: Track = {
       id: `url-stream-${station.url}`,
       title: stationLabel,
       artist: host,
@@ -2722,30 +2956,50 @@ export default function App() {
       isRadio: true,
     };
 
+    if (station.isCustom && /\.(m3u8?|pls)(\?.*)?$/i.test(station.url)) {
+      try {
+        const parsed = await loadTracksFromUrlSource(station.url);
+        if (parsed.tracks.length > 0) {
+          radioTrack = {
+            ...parsed.tracks[0],
+            title: parsed.tracks[0].title || stationLabel,
+            sourceName: 'RadioFM',
+            isRadio: true,
+          };
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : t.urlErrorFallback;
+        showToast(msg, 'error');
+        return;
+      }
+    }
+
     revokeLocalObjectUrls();
     pendingSeekRef.current = null;
     mirrorRetriesRef.current = 0;
 
-    setSavedUrls((prev) => {
-      if (prev.some((u) => u.url === station.url || u.id === urlId)) {
-        return prev;
-      }
-      const next = [
-        ...prev,
-        {
-          id: urlId,
-          url: station.url,
-          label: `${t.radioFmLabel}: ${stationLabel}`,
-          addedAt: Date.now(),
-        },
-      ];
-      try {
-        localStorage.setItem(STORAGE_URLS_KEY, JSON.stringify(next));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
+    if (!station.isCustom) {
+      setSavedUrls((prev) => {
+        if (prev.some((u) => u.url === station.url || u.id === urlId)) {
+          return prev;
+        }
+        const next = [
+          ...prev,
+          {
+            id: urlId,
+            url: station.url,
+            label: `${t.radioFmLabel}: ${stationLabel}`,
+            addedAt: Date.now(),
+          },
+        ];
+        try {
+          localStorage.setItem(STORAGE_URLS_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    }
 
     playlistRef.current = [radioTrack];
     currentIndexRef.current = 0;
@@ -2796,9 +3050,10 @@ export default function App() {
     persistCurrentSession,
     randomizeVisual,
     revokeLocalObjectUrls,
+    showToast,
     startPlaybackSafe,
     syncRadioCarouselForTrack,
-    t.radioFmLabel,
+    t,
   ]);
 
   // Track browser online/offline transitions smoothly
@@ -3010,6 +3265,11 @@ export default function App() {
       trackEvent('source_delete', { source_type: target.type });
       if (target.type === 'audius') {
         const deletedLower = target.id.toLowerCase();
+        if (isDefaultAudiusHandle(target.id)) {
+          const deleted = getDeletedDefaultAudiusHandles();
+          deleted.add(deletedLower);
+          setDeletedDefaultAudiusHandles(deleted);
+        }
         const nextProfiles = savedProfiles.filter((p) => p.toLowerCase() !== deletedLower);
         setSavedProfiles(nextProfiles);
         try {
@@ -3018,11 +3278,16 @@ export default function App() {
           // ignore
         }
         if (currentHandle.toLowerCase() === deletedLower) {
-          const fallbackHandle = nextProfiles[0] ?? getDefaultAudiusHandleForBrowser();
-          setCurrentHandle(fallbackHandle);
+          const fallbackHandle = nextProfiles[0] ?? '';
+          setCurrentHandle(fallbackHandle || getDefaultAudiusHandleForBrowser());
           try {
-            localStorage.removeItem(STORAGE_HANDLE_KEY);
-            localStorage.removeItem(STORAGE_MANUAL_AUDIUS_KEY);
+            if (fallbackHandle) {
+              localStorage.setItem(STORAGE_HANDLE_KEY, fallbackHandle);
+              localStorage.setItem(STORAGE_MANUAL_AUDIUS_KEY, '1');
+            } else {
+              localStorage.removeItem(STORAGE_HANDLE_KEY);
+              localStorage.removeItem(STORAGE_MANUAL_AUDIUS_KEY);
+            }
             localStorage.removeItem('yritmx_playback_session');
           } catch {
             // ignore
@@ -5414,6 +5679,7 @@ export default function App() {
     ) {
       return;
     }
+    window.clearTimeout(stageSwipeResetTimerRef.current);
     stageSwipeHandledRef.current = false;
     stageSwipeStartRef.current = {
       x: e.clientX,
@@ -5427,7 +5693,7 @@ export default function App() {
     const start = stageSwipeStartRef.current;
     if (!start || start.pointerId !== e.pointerId || start.triggered) return;
     const dist = Math.hypot(e.clientX - start.x, e.clientY - start.y);
-    if (dist >= 40) {
+    if (dist >= 36) {
       start.triggered = true;
       stageSwipeHandledRef.current = true;
       randomizeVisual();
@@ -5439,9 +5705,6 @@ export default function App() {
           // ignore
         }
       }
-      window.setTimeout(() => {
-        stageSwipeHandledRef.current = false;
-      }, 400);
     }
   };
 
@@ -5449,19 +5712,28 @@ export default function App() {
     const start = stageSwipeStartRef.current;
     if (start && start.pointerId === e.pointerId && !start.triggered) {
       const dist = Math.hypot(e.clientX - start.x, e.clientY - start.y);
-      if (dist >= 40) {
+      if (dist >= 36) {
         stageSwipeHandledRef.current = true;
         randomizeVisual();
         trackEvent('orbs_bg_swipe_theme');
-        window.setTimeout(() => {
-          stageSwipeHandledRef.current = false;
-        }, 400);
       }
+    }
+    if (stageSwipeHandledRef.current) {
+      window.clearTimeout(stageSwipeResetTimerRef.current);
+      stageSwipeResetTimerRef.current = window.setTimeout(() => {
+        stageSwipeHandledRef.current = false;
+      }, 220);
     }
     stageSwipeStartRef.current = null;
   };
 
   const handleStagePointerCancel = () => {
+    if (stageSwipeHandledRef.current) {
+      window.clearTimeout(stageSwipeResetTimerRef.current);
+      stageSwipeResetTimerRef.current = window.setTimeout(() => {
+        stageSwipeHandledRef.current = false;
+      }, 220);
+    }
     stageSwipeStartRef.current = null;
   };
 
@@ -5527,6 +5799,7 @@ export default function App() {
 
   const handleCoverPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+    window.clearTimeout(coverSwipeResetTimerRef.current);
     coverSwipeHandledRef.current = false;
     coverSwipeStartRef.current = {
       x: e.clientX,
@@ -5534,6 +5807,11 @@ export default function App() {
       pointerId: e.pointerId,
       triggered: false,
     };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore if pointer capture is unsupported
+    }
   };
 
   const handleCoverPointerMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
@@ -5541,33 +5819,72 @@ export default function App() {
     if (!start || start.pointerId !== e.pointerId || start.triggered) return;
     const dx = e.clientX - start.x;
     const dy = e.clientY - start.y;
-    if (Math.abs(dx) >= 36 && Math.abs(dx) > Math.abs(dy) * 1.1) {
+    if (Math.abs(dx) >= 28 && Math.abs(dx) > Math.abs(dy)) {
       start.triggered = true;
       coverSwipeHandledRef.current = true;
       triggerCoverSwipe(dx < 0 ? 'next' : 'prev');
-      window.setTimeout(() => {
-        coverSwipeHandledRef.current = false;
-      }, 450);
     }
   };
 
   const handleCoverPointerUp = (e: ReactPointerEvent<HTMLButtonElement>) => {
-    const start = coverSwipeStartRef.current;
-    if (start && start.pointerId === e.pointerId && !start.triggered) {
-      const dx = e.clientX - start.x;
-      const dy = e.clientY - start.y;
-      if (Math.abs(dx) >= 36 && Math.abs(dx) > Math.abs(dy) * 1.1) {
-        coverSwipeHandledRef.current = true;
-        triggerCoverSwipe(dx < 0 ? 'next' : 'prev');
-        window.setTimeout(() => {
-          coverSwipeHandledRef.current = false;
-        }, 450);
+    try {
+      if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
       }
+    } catch {
+      // ignore
+    }
+    const start = coverSwipeStartRef.current;
+    if (start && start.pointerId === e.pointerId) {
+      if (start.triggered) {
+        // Ensure playback & AudioContext unlock inside trusted pointerup activation if pointermove was blocked by browser autoplay policy
+        if (!isPlayingRef.current) {
+          if (!usingDirectAudioFallbackRef.current) {
+            ensureAudioGraph();
+          }
+          void startPlaybackSafe(true);
+        }
+      } else {
+        const dx = e.clientX - start.x;
+        const dy = e.clientY - start.y;
+        if (Math.abs(dx) >= 28 && Math.abs(dx) > Math.abs(dy)) {
+          coverSwipeHandledRef.current = true;
+          triggerCoverSwipe(dx < 0 ? 'next' : 'prev');
+        }
+      }
+    }
+    if (coverSwipeHandledRef.current) {
+      window.clearTimeout(coverSwipeResetTimerRef.current);
+      coverSwipeResetTimerRef.current = window.setTimeout(() => {
+        coverSwipeHandledRef.current = false;
+      }, 220);
     }
     coverSwipeStartRef.current = null;
   };
 
-  const handleCoverPointerCancel = () => {
+  const handleCoverPointerCancel = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    try {
+      if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // ignore
+    }
+    const start = coverSwipeStartRef.current;
+    if (start && start.pointerId === e.pointerId && !start.triggered) {
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      if (Math.abs(dx) >= 28 && Math.abs(dx) > Math.abs(dy)) {
+        coverSwipeHandledRef.current = true;
+        triggerCoverSwipe(dx < 0 ? 'next' : 'prev');
+      }
+    }
+    if (coverSwipeHandledRef.current) {
+      window.clearTimeout(coverSwipeResetTimerRef.current);
+      coverSwipeResetTimerRef.current = window.setTimeout(() => {
+        coverSwipeHandledRef.current = false;
+      }, 220);
+    }
     coverSwipeStartRef.current = null;
   };
 
@@ -5715,8 +6032,8 @@ export default function App() {
         activeMediaType={currentTrack?.mediaType}
         coverFrameMotion={coverFrameMotion}
         coverRotationTarget={coverRotationTarget}
-        coverCaptionTitle={showCoverCaption ? currentTrack?.title ?? null : null}
-        coverCaptionArtist={showCoverCaption ? currentTrack?.artist ?? null : null}
+        coverCaptionTitle={showCoverCaption ? coverDisplayTitle ?? null : null}
+        coverCaptionArtist={showCoverCaption ? coverDisplayArtist ?? null : null}
         isRecordArmed={isRecordArmed}
         recordAspect={recordAspect}
         recordQuality={recordQuality}
@@ -6101,6 +6418,8 @@ export default function App() {
           showCaptions={showOrbCaptions}
           isLayeredBackground={mixEnabled && visualDna.mixLayers.length > 0}
           snapshotRef={liveOrbsSnapshotRef}
+          radioNowPlaying={currentTrack?.isRadio ? radioNowPlaying : null}
+          showRadioNowPlaying={isShowingRadioNowPlaying}
           onSelectTrack={(idx) => void selectTrack(idx, true)}
           onTogglePlay={() => void togglePlay()}
         />
@@ -6412,7 +6731,7 @@ export default function App() {
               openSources(!isOnline && playlist.length === 0 ? 'folder' : 'audius');
             }}
             aria-label={t.coverAriaLabel}
-            className="relative group w-56 h-56 sm:w-64 sm:h-64 lg:w-72 lg:h-72 xl:w-80 xl:h-80 [@media(max-height:540px)_and_(orientation:landscape)]:w-36 [@media(max-height:540px)_and_(orientation:landscape)]:h-36 [@media(min-height:541px)_and_(max-height:700px)_and_(orientation:landscape)]:w-48 [@media(min-height:541px)_and_(max-height:700px)_and_(orientation:landscape)]:h-48 rounded-3xl overflow-hidden glass shadow-2xl shadow-purple-950/50 border border-white/10 transition-transform duration-300 hover:scale-[1.02] cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 touch-pan-y select-none"
+            className="relative group w-56 h-56 sm:w-64 sm:h-64 lg:w-72 lg:h-72 xl:w-80 xl:h-80 [@media(max-height:540px)_and_(orientation:landscape)]:w-36 [@media(max-height:540px)_and_(orientation:landscape)]:h-36 [@media(min-height:541px)_and_(max-height:700px)_and_(orientation:landscape)]:w-48 [@media(min-height:541px)_and_(max-height:700px)_and_(orientation:landscape)]:h-48 rounded-3xl overflow-hidden glass shadow-2xl shadow-purple-950/50 border border-white/10 transition-transform duration-300 hover:scale-[1.02] cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 touch-none select-none"
           >
             <img
               src={currentTrack?.cover || DEFAULT_COVER_IMAGE}
@@ -6444,7 +6763,7 @@ export default function App() {
                     : `Audius: @${currentHandle}`)}
               </div>
               <h2 className="text-lg sm:text-xl font-bold text-white truncate">
-                {currentTrack?.title ||
+                {coverDisplayTitle ||
                   pendingFolderRestore?.trackTitle ||
                   (isLoadingTracks
                     ? t.loadingRitmXoid
@@ -6453,7 +6772,7 @@ export default function App() {
                     : t.chooseTrack)}
               </h2>
               <p className="text-xs sm:text-sm text-gray-300 truncate">
-                {currentTrack?.artist ||
+                {coverDisplayArtist ||
                   pendingFolderRestore?.trackArtist ||
                   'YRitmX Audio Engine'}
               </p>

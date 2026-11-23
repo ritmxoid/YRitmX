@@ -2,6 +2,7 @@ import {
   Camera,
   Disc3,
   FolderOpen,
+  Hand,
   HelpCircle,
   Sliders,
   Sparkles,
@@ -31,6 +32,8 @@ function getSectionIcon(id: HelpSectionId) {
       return <Video className="w-4 h-4 text-rose-300 shrink-0" />;
     case 'audioAndApp':
       return <Sliders className="w-4 h-4 text-amber-300 shrink-0" />;
+    case 'gestures':
+      return <Hand className="w-4 h-4 text-cyan-300 shrink-0" />;
   }
 }
 

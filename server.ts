@@ -12,6 +12,116 @@ const CHROME_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const MAX_REDIRECTS = 5;
 const MAX_PLAYLIST_BYTES = 2 * 1024 * 1024;
+const RADIO_META_CACHE_TTL_MS = 8000;
+const RADIO_META_MAX_BYTES = 160 * 1024;
+
+interface CachedRadioMeta {
+  expiresAt: number;
+  title: string | null;
+  artist: string | null;
+  stationName: string | null;
+}
+
+const radioMetaCache = new Map<string, CachedRadioMeta>();
+
+function decodeIcyBytes(bytes: Uint8Array): string {
+  let end = bytes.length;
+  while (end > 0 && bytes[end - 1] === 0) {
+    end -= 1;
+  }
+  const trimmed = end === bytes.length ? bytes : bytes.subarray(0, end);
+  if (trimmed.length === 0) return '';
+
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(trimmed);
+  } catch {
+    try {
+      return new TextDecoder('windows-1251').decode(trimmed);
+    } catch {
+      return new TextDecoder('utf-8').decode(trimmed);
+    }
+  }
+}
+
+function cleanRadioTextFragment(raw: string): string {
+  return raw
+    .replace(/\0/g, '')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function splitRadioStreamTitle(
+  rawStreamTitle: string,
+  stationName: string | null
+): { title: string | null; artist: string | null } {
+  const cleaned = cleanRadioTextFragment(rawStreamTitle);
+  if (
+    !cleaned ||
+    cleaned === '-' ||
+    cleaned.length < 2 ||
+    /^https?:\/\//i.test(cleaned) ||
+    /^(?:unknown|no title|live stream|stream|ad|advert|commercial)$/i.test(cleaned)
+  ) {
+    return { title: null, artist: null };
+  }
+
+  if (stationName && cleaned.toLowerCase() === stationName.toLowerCase()) {
+    return { title: null, artist: null };
+  }
+
+  const sepMatch = cleaned.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+  if (sepMatch) {
+    const rawArtist = sepMatch[1].trim();
+    const rawSong = sepMatch[2].trim();
+    if (
+      rawArtist &&
+      rawSong &&
+      rawArtist !== '-' &&
+      rawSong !== '-' &&
+      !/^(?:unknown|advert|commercial)$/i.test(rawArtist)
+    ) {
+      return {
+        title: rawSong.slice(0, 140),
+        artist: rawArtist.slice(0, 100),
+      };
+    }
+  }
+
+  return {
+    title: cleaned.slice(0, 140),
+    artist: stationName ? stationName.slice(0, 100) : null,
+  };
+}
+
+function extractStreamTitleFromIcyBlock(
+  metaText: string,
+  stationName: string | null
+): { title: string | null; artist: string | null } {
+  if (!metaText) return { title: null, artist: null };
+
+  const fullMatch =
+    metaText.match(/StreamTitle='([\s\S]*?)';(?=\s*[A-Za-z0-9_-]+=|[\s;\r\n\0]*$)/i) ||
+    metaText.match(/StreamTitle='([^']*)'/i);
+  if (!fullMatch || !fullMatch[1]) {
+    return { title: null, artist: null };
+  }
+
+  return splitRadioStreamTitle(fullMatch[1], stationName);
+}
+
+function concatUint8Arrays(a: Uint8Array, b: Uint8Array): Uint8Array {
+  if (a.length === 0) return b;
+  if (b.length === 0) return a;
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
 
 function isPrivateIpv4(ip: string): boolean {
   const parts = ip.split('.').map((n) => Number.parseInt(n, 10));
@@ -229,6 +339,182 @@ async function startServer() {
             ? 400
             : 502;
         res.status(status).json({ error: message });
+      }
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  });
+
+  // Same-origin radio Now Playing metadata extractor (reads ICY StreamTitle safely on server)
+  app.get('/api/radio-metadata', async (req: Request, res: Response) => {
+    const rawUrl = typeof req.query.url === 'string' ? req.query.url.trim() : '';
+    if (!rawUrl || rawUrl.length > 2048) {
+      res.status(400).json({ error: 'Invalid url parameter' });
+      return;
+    }
+
+    const now = Date.now();
+    const cached = radioMetaCache.get(rawUrl);
+    if (cached && cached.expiresAt > now) {
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({
+        title: cached.title,
+        artist: cached.artist,
+        stationName: cached.stationName,
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 7000);
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        controller.abort();
+      }
+    });
+
+    const writeCache = (entry: Omit<CachedRadioMeta, 'expiresAt'>) => {
+      if (radioMetaCache.size >= 150) {
+        const firstKey = radioMetaCache.keys().next().value;
+        if (firstKey) radioMetaCache.delete(firstKey);
+      }
+      radioMetaCache.set(rawUrl, {
+        ...entry,
+        expiresAt: Date.now() + RADIO_META_CACHE_TTL_MS,
+      });
+    };
+
+    try {
+      const { response: upstream } = await fetchWithSafeRedirects(rawUrl, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': CHROME_UA,
+          'Icy-MetaData': '1',
+          Accept: '*/*',
+        },
+      });
+
+      const rawStationName = upstream.headers.get('icy-name');
+      const stationName = rawStationName ? cleanRadioTextFragment(rawStationName) || null : null;
+
+      if (!upstream.ok || !upstream.body) {
+        void upstream.body?.cancel?.().catch(() => {});
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ title: null, artist: null, stationName });
+        return;
+      }
+
+      const contentType = (upstream.headers.get('content-type') || '').toLowerCase();
+      const metaintRaw = upstream.headers.get('icy-metaint');
+      const metaint = metaintRaw ? Number.parseInt(metaintRaw, 10) : 0;
+
+      // Case 1: HLS playlist metadata (#EXTINF title)
+      if (!metaint && contentType.includes('mpegurl')) {
+        const reader = upstream.body.getReader();
+        let bytesRead = 0;
+        const chunks: Uint8Array[] = [];
+        try {
+          while (bytesRead < 32768) {
+            const { done, value } = await reader.read();
+            if (done || !value) break;
+            chunks.push(value);
+            bytesRead += value.byteLength;
+          }
+        } finally {
+          void reader.cancel().catch(() => {});
+        }
+        const text = decodeIcyBytes(Buffer.concat(chunks));
+        let title: string | null = null;
+        let artist: string | null = null;
+        for (const line of text.split(/\r?\n/)) {
+          if (!line.startsWith('#EXTINF:')) continue;
+          const commaIdx = line.indexOf(',');
+          if (commaIdx === -1) continue;
+          const candidate = line.slice(commaIdx + 1).trim();
+          if (candidate && !/^no title$/i.test(candidate)) {
+            const parsed = splitRadioStreamTitle(candidate, stationName);
+            if (parsed.title) {
+              title = parsed.title;
+              artist = parsed.artist;
+              break;
+            }
+          }
+        }
+        writeCache({ title, artist, stationName });
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ title, artist, stationName });
+        return;
+      }
+
+      // Case 2: Standard ICY stream without icy-metaint header
+      if (!Number.isFinite(metaint) || metaint <= 0 || metaint > 262144) {
+        void upstream.body.cancel().catch(() => {});
+        writeCache({ title: null, artist: null, stationName });
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ title: null, artist: null, stationName });
+        return;
+      }
+
+      // Case 3: Read ICY audio+metadata frame (up to 2 blocks when interval is small)
+      const reader = upstream.body.getReader();
+      let buffer: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
+      let totalRead = 0;
+      let blocksChecked = 0;
+      const maxBlocks = metaint <= 32768 ? 2 : 1;
+      let parsedTitle: string | null = null;
+      let parsedArtist: string | null = null;
+
+      try {
+        while (blocksChecked < maxBlocks && totalRead < RADIO_META_MAX_BYTES) {
+          // Ensure we have metaint audio bytes + 1 length byte
+          while (buffer.length <= metaint) {
+            if (totalRead >= RADIO_META_MAX_BYTES) break;
+            const { done, value } = await reader.read();
+            if (done || !value) break;
+            totalRead += value.byteLength;
+            buffer = concatUint8Arrays(buffer, value);
+          }
+
+          if (buffer.length <= metaint) break;
+
+          const metaLen = buffer[metaint] * 16;
+          const blockEnd = metaint + 1 + metaLen;
+
+          while (buffer.length < blockEnd) {
+            if (totalRead >= RADIO_META_MAX_BYTES) break;
+            const { done, value } = await reader.read();
+            if (done || !value) break;
+            totalRead += value.byteLength;
+            buffer = concatUint8Arrays(buffer, value);
+          }
+
+          if (buffer.length < blockEnd) break;
+
+          if (metaLen > 0) {
+            const metaSlice = buffer.subarray(metaint + 1, blockEnd);
+            const metaText = decodeIcyBytes(metaSlice);
+            const extracted = extractStreamTitleFromIcyBlock(metaText, stationName);
+            if (extracted.title) {
+              parsedTitle = extracted.title;
+              parsedArtist = extracted.artist;
+              break;
+            }
+          }
+
+          blocksChecked += 1;
+          buffer = buffer.subarray(blockEnd);
+        }
+      } finally {
+        void reader.cancel().catch(() => {});
+      }
+
+      writeCache({ title: parsedTitle, artist: parsedArtist, stationName });
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ title: parsedTitle, artist: parsedArtist, stationName });
+    } catch {
+      if (!res.headersSent) {
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ title: null, artist: null, stationName: null });
       }
     } finally {
       clearTimeout(timeoutId);

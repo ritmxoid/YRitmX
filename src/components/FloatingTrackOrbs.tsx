@@ -26,6 +26,8 @@ interface FloatingTrackOrbsProps {
   showCaptions: boolean;
   isLayeredBackground?: boolean;
   snapshotRef?: MutableRefObject<LiveOrbSnapshot[]>;
+  radioNowPlaying?: { title: string; artist: string } | null;
+  showRadioNowPlaying?: boolean;
   onSelectTrack: (index: number) => void;
   onTogglePlay: () => void;
 }
@@ -142,6 +144,8 @@ export function FloatingTrackOrbs({
   showCaptions,
   isLayeredBackground = false,
   snapshotRef,
+  radioNowPlaying = null,
+  showRadioNowPlaying = false,
   onSelectTrack,
   onTogglePlay,
 }: FloatingTrackOrbsProps) {
@@ -1080,7 +1084,24 @@ export function FloatingTrackOrbs({
         const arcPath = `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${arcR} ${arcR} 0 1 0 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
         const pathId = `${basePathId}-orb-arc-${idx}`;
         const maxArcPx = arcR * ((246 * Math.PI) / 180);
-        const fittedCaption = showCaptions ? fitTextToArcWidth(spec.track.title, maxArcPx) : '';
+        const isRadioTrack = Boolean(
+          spec.track.isRadio ||
+            spec.track.sourceName === 'RadioFM' ||
+            spec.track.sourceName === t.radioFmLabel
+        );
+        const nowPlayingArcText =
+          spec.isActive && isRadioTrack && showRadioNowPlaying && radioNowPlaying?.title
+            ? radioNowPlaying.artist
+              ? `${radioNowPlaying.title} — ${radioNowPlaying.artist}`
+              : radioNowPlaying.title
+            : spec.track.title;
+        const fittedCaption = showCaptions ? fitTextToArcWidth(nowPlayingArcText, maxArcPx) : '';
+        const orbTooltip =
+          spec.isActive && isRadioTrack && showRadioNowPlaying && radioNowPlaying?.title
+            ? radioNowPlaying.artist
+              ? `${radioNowPlaying.title} — ${radioNowPlaying.artist}`
+              : radioNowPlaying.title
+            : `${spec.track.title} — ${spec.track.artist}`;
 
         return (
           <button
@@ -1107,10 +1128,10 @@ export function FloatingTrackOrbs({
               width: `${spec.size}px`,
               height: `${spec.size}px`,
             }}
-            title={`${spec.track.title} — ${spec.track.artist}`}
+            title={orbTooltip}
             aria-label={
               spec.isActive
-                ? `${t.orbPlayTitle}: ${spec.track.title}`
+                ? `${t.orbPlayTitle}: ${nowPlayingArcText}`
                 : `${t.orbSwitchTitle} ${spec.track.title}`
             }
             className={`fixed top-0 left-0 opacity-0 overflow-visible pointer-events-auto cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white will-change-transform ${
@@ -1128,7 +1149,7 @@ export function FloatingTrackOrbs({
             >
               <img
                 src={spec.track.cover || DEFAULT_COVER_IMAGE}
-                alt={spec.track.title}
+                alt={nowPlayingArcText}
                 referrerPolicy="no-referrer"
                 onError={(e) => {
                   const img = e.currentTarget;
@@ -1157,7 +1178,7 @@ export function FloatingTrackOrbs({
                     <Play className="w-5 h-5 text-white fill-current mb-0.5" />
                   )}
                   <span className="text-[10px] font-semibold text-white leading-tight line-clamp-2 max-w-full">
-                    {spec.track.title}
+                    {nowPlayingArcText}
                   </span>
                 </div>
               </div>

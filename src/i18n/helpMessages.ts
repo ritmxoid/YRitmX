@@ -6,7 +6,8 @@ export type HelpSectionId =
   | 'orbs'
   | 'backdrop'
   | 'studio'
-  | 'audioAndApp';
+  | 'audioAndApp'
+  | 'gestures';
 
 export interface HelpSection {
   id: HelpSectionId;
@@ -88,6 +89,17 @@ const EN_HELP: HelpMessages = {
         'Use Fullscreen in the top bar or Menu anytime, and install YRitmX via Install App to use it offline as a standalone PWA.',
       ],
     },
+    {
+      id: 'gestures',
+      title: '7. Touch & Mouse Gestures',
+      items: [
+        'Square Cover: short tap opens Media Sources; swipe left or right to start the next or previous track (or next/previous station on Radio).',
+        'FM Button (bottom bar): short tap switches stations sequentially (custom saved streams first, then 2 national + 10 genre channels); long-press (~0.6 s) opens Media Sources → URL.',
+        'Play Button (bottom bar): short tap Plays/Pauses (or starts/stops Recording when Studio is armed); long-press (~0.6 s) opens or closes Space Studio & MP4 Recording Mode.',
+        'Cosmic Background & Floating Orbs: short tap on empty background toggles Zen Mode; swipe anywhere on the animation background in Floating Orbs mode to switch the visual theme; tap any Orb to switch tracks or Play/Pause.',
+        'Studio Frame Stage: drag the frame (or PiP Camera) to move it; short tap on the frame changes shape; long-press (~0.6 s) on the frame toggles resize/stretch/rotation handles; short tap on background randomizes theme and neon contour.',
+      ],
+    },
   ],
 };
 
@@ -154,6 +166,17 @@ const RU_HELP: HelpMessages = {
         '5-полосный эквалайзер (60 Гц – 14 кГц) доступен в шапке и меню настроек; пресеты работают как при прослушивании, так и при записи MP4.',
         'Войдите по Email/паролю или через Google в «Источниках медиа», чтобы синхронизировать Audius, папки и URL-станции сразу для всех вкладок.',
         'Кнопка полноэкранного режима есть в шапке и меню. Плеер можно установить как отдельное приложение (PWA) для работы даже офлайн.',
+      ],
+    },
+    {
+      id: 'gestures',
+      title: '7. Жесты, короткие и долгие нажатия',
+      items: [
+        'Квадратная обложка: короткий тап открывает «Источники медиа»; свайп влево/вправо запускает следующий или предыдущий трек (а на Радио — следующую или предыдущую FM-станцию).',
+        'Кнопка FM (нижняя панель): короткий тап последовательно переключает станции (сначала ваши сохранённые потоки, затем 2 национальные и 10 жанровых); долгий тап (~0.6 с) открывает «Источники медиа → URL».',
+        'Кнопка Play (нижняя панель): короткий тап включает Play/Пауза (или старт/стоп записи в Студии); долгий тап (~0.6 с) открывает или закрывает Режим Студии и записи MP4.',
+        'Фон и летающие сферы: короткий тап по пустому фону включает/выключает Дзен-режим; свайп по фону анимации в режиме сфер меняет тему визуализации; тап по сфере переключает трек или ставит паузу.',
+        'Сцена Студии: перетаскивание двигает фрейм (или окно камеры PiP); короткий тап по фрейму меняет форму; долгий тап (~0.6 с) по фрейму открывает рамку масштаба, растяжения и поворота; тап по фону меняет стиль и неон-контур.',
       ],
     },
   ],
@@ -224,6 +247,17 @@ const UK_HELP: HelpMessages = {
         'Повноекранний режим доступний у шапці та меню; плеєр можна встановити як окремий PWA-додаток.',
       ],
     },
+    {
+      id: 'gestures',
+      title: '7. Жести, короткі й довгі натискання',
+      items: [
+        'Квадратна обкладинка: короткий тап відкриває «Джерела медіа»; свайп ліворуч/праворуч запускає наступний або попередній трек (на Радіо — наступну чи попередню FM-станцію).',
+        'Кнопка FM (нижня панель): короткий тап послідовно перемикає станції (спочатку ваші збережені потоки, далі 2 національні й 10 жанрових); довгий тап (~0.6 с) відкриває «Джерела медіа → URL».',
+        'Кнопка Play (нижня панель): короткий тап керує відтворенням (або стартом/стопом запису в Студії); довгий тап (~0.6 с) відкриває чи закриває Режим Студії та запису MP4.',
+        'Фон і летючі сфери: короткий тап по фону вмикає/вимикає Дзен-режим; свайп по фону анімації в режимі сфер змінює тему візуалізації; тап по сфері перемикає трек або паузу.',
+        'Сцена Студії: перетягування рухає фрейм (або вікно камери PiP); короткий тап по фрейму змінює форму; довгий тап (~0.6 с) вмикає рамку масштабу, розтягування й обертання; тап по фону оновлює стиль і контур.',
+      ],
+    },
   ],
 };
 
@@ -290,6 +324,17 @@ const ES_HELP: HelpMessages = {
         'Ecualizador de 5 bandas (60 Hz – 14 kHz) disponible en el encabezado o menú, activo en reproducción y exportación MP4.',
         'Inicia sesión con Email/contraseña o Google en Fuentes para sincronizar Audius, carpetas y URLs en todos tus dispositivos.',
         'Activa Pantalla completa desde el encabezado/menú o instala YRitmX como aplicación PWA.',
+      ],
+    },
+    {
+      id: 'gestures',
+      title: '7. Gestos, toques cortos y largos',
+      items: [
+        'Carátula cuadrada: toque corto abre Fuentes multimedia; desliza a izquierda/derecha para iniciar la pista siguiente/anterior (o emisora FM siguiente/anterior).',
+        'Botón FM (barra inferior): toque corto alterna emisoras en orden (primero tus streams guardados, luego 2 nacionales + 10 por género); toque largo (~0.6 s) abre Fuentes → URL.',
+        'Botón Play (barra inferior): toque corto reproduce/pausa (o inicia/detiene grabación en Estudio); toque largo (~0.6 s) abre o cierra el Estudio Espacial y grabación MP4.',
+        'Fondo cósmico y esferas: toque corto en el fondo activa/desactiva Modo Zen; desliza sobre el fondo animado en modo esferas para cambiar el tema visual; toca una esfera para cambiar de pista o Play/Pausa.',
+        'Escenario del Estudio: arrastra el marco (o la cámara PiP) para moverlo; toque corto cambia la forma; toque largo (~0.6 s) activa controles de escala/estiramiento/rotación; toque corto en el fondo cambia estilo y neón.',
       ],
     },
   ],
@@ -360,6 +405,17 @@ const FR_HELP: HelpMessages = {
         'Mode Plein écran disponible dans la barre supérieure/menu, et installation PWA pour l’usage hors ligne.',
       ],
     },
+    {
+      id: 'gestures',
+      title: '7. Gestes, appuis courts et longs',
+      items: [
+        'Pochette carrée : appui court ouvre Sources média ; balayage gauche/droite lance le morceau ou la radio FM suivant/précédent.',
+        'Bouton FM (barre inférieure) : appui court fait défiler les stations (vos flux enregistrés d’abord, puis 2 nationales + 10 genres) ; appui long (~0,6 s) ouvre Sources → URL.',
+        'Bouton Play (barre inférieure) : appui court Play/Pause (ou Enregistrer/Stop en Studio) ; appui long (~0,6 s) ouvre ou ferme le Studio Spatial et l’enregistrement MP4.',
+        'Arrière-plan et sphères : appui court sur le fond vide active/quitte le Mode Zen ; balayage sur le fond animé en mode sphères change le thème visuel ; touchez une sphère pour changer de piste ou Play/Pause.',
+        'Scène du Studio : glissez le cadre (ou la caméra PiP) pour le déplacer ; appui court sur le cadre change la forme ; appui long (~0,6 s) affiche les poignées de taille/étirement/rotation ; appui court sur le fond renouvelle style et néon.',
+      ],
+    },
   ],
 };
 
@@ -426,6 +482,17 @@ const DE_HELP: HelpMessages = {
         '5-Band-Equalizer (60 Hz – 14 kHz) in Kopfzeile/Menü für Wiedergabe und MP4-Export.',
         'Melde dich in den Quellen per E-Mail/Passwort oder Google an, um Audius, Ordner und URLs geräteübergreifend zu synchronisieren.',
         'Vollbild über Kopfzeile/Menü steuerbar; als eigenständige PWA offline installierbar.',
+      ],
+    },
+    {
+      id: 'gestures',
+      title: '7. Gesten, kurzes & langes Tippen',
+      items: [
+        'Quadratisches Cover: kurzes Tippen öffnet Medienquellen; Wischen nach links/rechts startet den nächsten/vorherigen Track (oder Radiosender).',
+        'FM-Taste (unten): kurzes Tippen schaltet Sender nacheinander durch (zuerst gespeicherte Streams, dann 2 nationale + 10 Genre-Sender); langes Drücken (~0,6 s) öffnet Quellen → URL.',
+        'Play-Taste (unten): kurzes Tippen für Play/Pause (oder Aufnahme Start/Stopp im Studio); langes Drücken (~0,6 s) öffnet oder schließt Space Studio & MP4-Aufnahme.',
+        'Hintergrund & Sphären: kurzes Tippen auf den Hintergrund wechselt in den Zen-Modus; Wischen über den animierten Hintergrund im Sphären-Modus wechselt das Theme; Tippen auf eine Sphäre steuert Trackwechsel oder Play/Pause.',
+        'Studio-Bühne: Rahmen (oder PiP-Kamera) per Ziehen verschieben; kurzes Tippen ändert die Form; langes Drücken (~0,6 s) öffnet Skalier-/Streck-/Drehpunkte; kurzes Tippen auf den Hintergrund erneuert Stil & Neon.',
       ],
     },
   ],
@@ -496,6 +563,17 @@ const IT_HELP: HelpMessages = {
         'Schermo intero disponibile nell’intestazione o nel menu; installabile come app PWA.',
       ],
     },
+    {
+      id: 'gestures',
+      title: '7. Gesti, tocchi brevi e prolungati',
+      items: [
+        'Copertina quadrata: tocco breve apre Sorgenti multimediali; scorrimento destra/sinistra avvia il brano o la stazione FM successiva/precedente.',
+        'Pulsante FM (barra inferiore): tocco breve scorre le stazioni (prima gli stream salvati, poi 2 nazionali + 10 di genere); pressione prolungata (~0,6 s) apre Sorgenti → URL.',
+        'Pulsante Play (barra inferiore): tocco breve Play/Pausa (o Avvia/Stop registrazione in Studio); pressione prolungata (~0,6 s) apre o chiude Space Studio e registrazione MP4.',
+        'Sfondo e sfere: tocco breve sullo sfondo vuoto attiva/esce da Zen; scorrimento sullo sfondo animato in modalità sfere cambia tema visivo; tocco su una sfera cambia brano o Play/Pausa.',
+        'Scena Studio: trascina la cornice (o la camera PiP) per spostarla; tocco breve sulla cornice cambia forma; pressione prolungata (~0,6 s) mostra le maniglie di scala/rotazione; tocco sullo sfondo rinnova stile e neon.',
+      ],
+    },
   ],
 };
 
@@ -562,6 +640,17 @@ const PT_HELP: HelpMessages = {
         'Equalizador de 5 bandas (60 Hz – 14 kHz) no topo ou menu, aplicado na reprodução e no MP4.',
         'Entre com E-mail/senha ou Google em Fontes para sincronizar Audius, pastas e URLs entre dispositivos.',
         'Tela cheia disponível no topo ou menu; instale como app PWA para uso offline.',
+      ],
+    },
+    {
+      id: 'gestures',
+      title: '7. Gestos, toques curtos e longos',
+      items: [
+        'Capa quadrada: toque curto abre Fontes de mídia; deslizar para esquerda/direita inicia a próxima faixa ou anterior (ou próxima/anterior rádio FM).',
+        'Botão FM (barra inferior): toque curto alterna estações em sequência (seus streams salvos primeiro, depois 2 nacionais + 10 por gênero); segurar (~0,6 s) abre Fontes → URL.',
+        'Botão Play (barra inferior): toque curto Play/Pausa (ou Gravar/Parar no Estúdio); segurar (~0,6 s) abre ou fecha o Modo Estúdio e gravação MP4.',
+        'Fundo cósmico e esferas: toque curto no fundo vazio ativa/sai do Modo Zen; deslizar pelo fundo animado no modo esferas troca o tema visual; toque numa esfera troca de faixa ou Play/Pausa.',
+        'Palco do Estúdio: arraste a moldura (ou câmera PiP) para mover; toque curto na moldura troca a forma; segurar (~0,6 s) abre alças de escala/rotação; toque curto no fundo renova estilo e neon.',
       ],
     },
   ],
@@ -632,6 +721,17 @@ const ZH_HELP: HelpMessages = {
         '可通过顶部或菜单切换全屏，或安装为 PWA 独立应用支持离线播放。',
       ],
     },
+    {
+      id: 'gestures',
+      title: '7. 手势、短按与长按操作',
+      items: [
+        '方形封面：短按打开“媒体源”；左右滑动立即切换到下一首/上一首曲目（或下一/上一 FM 电台）。',
+        '底部 FM 按钮：短按依次切换电台（优先您收藏的电台，随后是 2 个本国电台 + 10 个流派电台）；长按约 0.6 秒打开“媒体源 → URL”。',
+        '底部播放按钮：短按播放/暂停（或在工作室模式下开始/停止录制）；长按约 0.6 秒开启或关闭空间工作室与 MP4 录制模式。',
+        '背景与悬浮球体：轻点空白背景切换禅意模式；在悬浮球体模式下滑动动画背景可直接切换视觉主题；点击球体切歌或播放/暂停。',
+        '工作室舞台：拖动相框（或画中画摄像头窗口）可自由移动；短按相框切换几何形状；长按相框约 0.6 秒开启缩放/拉伸/旋转控制点；短按背景更换配色与霓虹轮廓。',
+      ],
+    },
   ],
 };
 
@@ -698,6 +798,17 @@ const JA_HELP: HelpMessages = {
         '上部またはメニューの5バンドイコライザー（60Hz〜14kHz）は再生とMP4出力の両方に反映されます。',
         'ソース画面でメール/パスワードまたは Google でログインすると、Audius・フォルダ・URLを端末間で同期できます。',
         '上部またはメニューから全画面切替や、オフライン対応アプリ（PWA）のインストールが可能です。',
+      ],
+    },
+    {
+      id: 'gestures',
+      title: '7. ジェスチャー・短押し・長押し操作',
+      items: [
+        '正方形ジャケット：短押しでメディアソースを開き、左右スワイプで次/前の曲（または次/前のFM局）を再生します。',
+        '下部 FM ボタン：短押しで順番にラジオ切替（保存済みカスタム局 → 国別2局 → ジャンル10局）；長押し（約0.6秒）でメディアソース → URL を開きます。',
+        '下部 Play ボタン：短押しで再生/一時停止（スタジオ時は録画開始/停止）；長押し（約0.6秒）でスペーススタジオ＆MP4録画モードを切り替えます。',
+        '背景と浮遊球体：背景の短押しでゼンモード切替；浮遊球体モード中にアニメーション背景をスワイプするとテーマ切替；球体タップで曲切替や再生/一時停止。',
+        'スタジオステージ：枠（またはPIPカメラ）をドラッグで移動；枠の短押しで形状変更；枠の長押し（約0.6秒）で拡大・変形・回転ハンドル表示；背景短押しでスタイル＆ネオン更新。',
       ],
     },
   ],
@@ -768,6 +879,17 @@ const KO_HELP: HelpMessages = {
         '상단 또는 메뉴에서 전체 화면을 전환하거나 오프라인 지원 앱(PWA)으로 설치할 수 있습니다.',
       ],
     },
+    {
+      id: 'gestures',
+      title: '7. 제스처, 짧은 탭 및 길게 누르기',
+      items: [
+        '정사각형 커버: 짧은 탭은 미디어 소스를 열고, 좌/우 스와이프는 다음/이전 트랙(또는 다음/이전 FM 방송)을 실행합니다.',
+        '하단 FM 버튼: 짧은 탭은 순서대로 라디오 전환(사용자 저장 방송 우선 → 국가별 2개 → 장르 10개); 길게 누르기(약 0.6초)는 미디어 소스 → URL을 엽니다.',
+        '하단 Play 버튼: 짧은 탭은 재생/일시정지(녹화 대기 중엔 녹화 시작/정지); 길게 누르기(약 0.6초)는 스페이스 스튜디오 및 MP4 녹화 모드를 켜거나 끕니다.',
+        '배경 및 떠다니는 구체: 빈 배경 짧은 탭으로 젠 모드 전환; 구체 모드에서 애니메이션 배경 스와이프로 시각화 테마 변경; 구체 탭으로 트랙 전환 또는 재생/일시정지.',
+        '스튜디오 무대: 프레임(또는 PIP 카메라)을 드래그해 이동; 프레임 짧은 탭으로 도형 변경; 프레임 길게 누르기(약 0.6초)로 크기/변형/회전 핸들 표시; 배경 탭으로 스타일 및 네온 테두리 변경.',
+      ],
+    },
   ],
 };
 
@@ -834,6 +956,17 @@ const TR_HELP: HelpMessages = {
         'Üst çubuk veya menüdeki 5 bantlı ekolayzer (60 Hz – 14 kHz) hem dinlemede hem MP4 aktarımında çalışır.',
         'Kaynaklar penceresinde E-posta/Şifre veya Google ile giriş yaparak Audius, klasör ve URL listelerinizi cihazlar arasında eşitleyin.',
         'Üst çubuktan Tam Ekran açabilir veya uygulamayı çevrimdışı PWA olarak yükleyebilirsiniz.',
+      ],
+    },
+    {
+      id: 'gestures',
+      title: '7. Hareketler, Kısa ve Uzun Dokunuşlar',
+      items: [
+        'Kare Kapak: kısa dokunuş Medya Kaynaklarını açar; sola/sağa kaydırma sonraki veya önceki parçayı (ya da FM istasyonunu) başlatır.',
+        'Alt Çubuk FM Düğmesi: kısa dokunuş istasyonları sırayla değiştirir (önce kendi kayıtlı akışlarınız, sonra 2 ulusal + 10 tür kanalı); basılı tutma (~0,6 sn) Kaynaklar → URL’yi açar.',
+        'Alt Çubuk Play Düğmesi: kısa dokunuş Oynat/Duraklat (Stüdyoda Kaydet/Durdur); basılı tutma (~0,6 sn) Uzay Stüdyosu ve MP4 Kayıt Modunu açar veya kapatır.',
+        'Arka Plan ve Yüzen Küreler: boş arka plana kısa dokunuş Zen Modunu açar/kapatır; küre modunda animasyon arka planını kaydırmak görsel temayı değiştirir; küreye dokunmak parça değiştirir veya oynatır/duraklatır.',
+        'Stüdyo Sahnesi: çerçeveyi (veya PiP kamerayı) sürükleyerek taşıyın; çerçeveye kısa dokunuş şekli değiştirir; basılı tutma (~0,6 sn) ölçek/esnetme/döndürme tutamaçlarını açar; arka plana dokunuş stili ve neonu yeniler.',
       ],
     },
   ],
@@ -904,6 +1037,17 @@ const PL_HELP: HelpMessages = {
         'Przełączaj Pełny ekran lub zainstaluj YRitmX jako aplikację PWA offline.',
       ],
     },
+    {
+      id: 'gestures',
+      title: '7. Gesty, krótkie i długie przytrzymania',
+      items: [
+        'Kwadratowa okładka: krótkie kliknięcie otwiera Źródła mediów; przesunięcie w lewo/prawo uruchamia kolejny lub poprzedni utwór (albo stację FM).',
+        'Przycisk FM (dolny pasek): krótkie kliknięcie przełącza stacje po kolei (najpierw własne zapisane, potem 2 krajowe + 10 gatunkowych); przytrzymanie (~0,6 s) otwiera Źródła → URL.',
+        'Przycisk Play (dolny pasek): krótkie kliknięcie Play/Pauza (lub Nagrywaj/Stop w Studiu); przytrzymanie (~0,6 s) włącza lub wyłącza Studio Kosmiczne i zapis MP4.',
+        'Tło i latające sfery: krótkie kliknięcie pustego tła włącza/wyłącza Tryb Zen; przesunięcie po animowanym tle w trybie sfer zmienia motyw wizualny; kliknięcie sfery zmienia utwór lub pauzuje.',
+        'Scena Studia: przeciąganie przesuwa ramkę (lub okno kamery PiP); krótkie kliknięcie ramki zmienia kształt; przytrzymanie ramki (~0,6 s) otwiera uchwyty skali, rozciągania i obrotu; kliknięcie tła odświeża styl i neon.',
+      ],
+    },
   ],
 };
 
@@ -970,6 +1114,17 @@ const AR_HELP: HelpMessages = {
         'معادل الصوت خماسي النطاقات (60 هرتز – 14 كيلوهرتز) متاح في الشريط العلوي أو القائمة ويعمل أثناء الاستماع والتصدير.',
         'سجّل الدخول بالبريد/كلمة المرور أو Google من مصادر الوسائط لمزامنة Audius والمجلدات والروابط عبر أجهزتك.',
         'يمكنك تفعيل ملء الشاشة أو تثبيت YRitmX كتطبيق PWA للعمل دون إنترنت.',
+      ],
+    },
+    {
+      id: 'gestures',
+      title: '7. الإيماءات والنقرات القصيرة والمطوّلة',
+      items: [
+        'الغلاف المربع: النقر القصير يفتح مصادر الوسائط؛ والسحب لليسار أو اليمين يشغّل المقطع التالي أو السابق (أو محطة FM التالية/السابقة).',
+        'زر FM (الشريط السفلي): النقر القصير يبدّل المحطات بالتتابع (محطاتك المحفوظة أولاً ثم محطتان وطنيتان + 10 حسب النوع)؛ والضغط المطوّل (~0.6 ث) يفتح المصادر ← الرابط.',
+        'زر التشغيل Play (الشريط السفلي): النقر القصير للتشغيل/الإيقاف المؤقت (أو التسجيل/الإيقاف في الاستوديو)؛ والضغط المطوّل (~0.6 ث) يفتح أو يغلق وضع الاستوديو وتسجيل MP4.',
+        'الخلفية والكرات العائمة: النقر القصير على الخلفية الفارغة يبدّل وضع الزن؛ والسحب على الخلفية المتحركة في وضع الكرات يغيّر النمط البصري؛ والنقر على كرة يبدّل المقطع أو يوقفه.',
+        'مسرح الاستوديو: اسحب الإطار (أو نافذة الكاميرا) لتحريكه؛ النقر القصير على الإطار يغيّر الشكل؛ الضغط المطوّل (~0.6 ث) يظهر مقابض التحجيم والتدوير؛ والنقر على الخلفية يجدد النمط والنيون.',
       ],
     },
   ],
@@ -1040,6 +1195,17 @@ const HI_HELP: HelpMessages = {
         'ऊपरी बार या मेनू से फुलस्क्रीन चलाएँ या ऑफ़लाइन PWA ऐप इंस्टॉल करें।',
       ],
     },
+    {
+      id: 'gestures',
+      title: '7. जेस्चर, छोटे और लंबे टैप',
+      items: [
+        'चौकोर कवर: छोटे टैप से मीडिया स्रोत खुलता है; बाएँ/दाएँ स्वाइप से अगला या पिछला ट्रैक (या अगला/पिछला FM स्टेशन) तुरंत चलता है।',
+        'निचला FM बटन: छोटे टैप से क्रमशः स्टेशन बदलते हैं (पहले आपकी सहेजी हुई स्ट्रीम, फिर 2 राष्ट्रीय + 10 जॉनर स्टेशन); दबाए रखने (~0.6 से) पर मीडिया स्रोत → URL खुलता है।',
+        'निचला Play बटन: छोटे टैप से प्ले/पॉज़ (या स्टूडियो में रिकॉर्ड/स्टॉप); दबाए रखने (~0.6 से) पर स्पेस स्टूडियो और MP4 रिकॉर्डिंग मोड खुलता/बंद होता है।',
+        'पृष्ठभूमि और तैरते गोले: खाली पृष्ठभूमि पर छोटे टैप से ज़ेन मोड ऑन/ऑफ़ होता है; गोलों वाले मोड में एनीमेशन पृष्ठभूमि पर स्वाइप से विज़ुअल थीम बदलती है; गोले पर टैप से ट्रैक या प्ले/पॉज़ बदलता है।',
+        'स्टूडियो स्टेज: फ़्रेम (या PiP कैमरा) खींचकर खिसकाएँ; फ़्रेम पर छोटे टैप से आकार बदलता है; दबाए रखने (~0.6 से) पर स्केल/स्ट्रेच/रोटेशन हैंडल खुलते हैं; पृष्ठभूमि टैप से स्टाइल व नियॉन बदलता है।',
+      ],
+    },
   ],
 };
 
@@ -1108,6 +1274,17 @@ const UZ_HELP: HelpMessages = {
         'Yuqori panel yoki menyudan To‘liq ekranni yoqing hamda pleyerni oflayn PWA ilova sifatida o‘rnating.',
       ],
     },
+    {
+      id: 'gestures',
+      title: '7. Imo-ishoralar, qisqa va uzoq bosishlar',
+      items: [
+        'Kvadrat muqova: qisqa bosish «Media manbalari»ni ochadi; chapga/o‘ngga surish (svayp) keyingi yoki oldingi trekni (yoki FM stansiyasini) ishga tushiradi.',
+        'Pastki FM tugmasi: qisqa bosish stansiyalarni ketma-ket almashtiradi (avval saqlangan oqimlaringiz, so‘ng 2 ta milliy + 10 ta janrli); bosib turish (~0.6 s) «Manbalar → URL»ni ochadi.',
+        'Pastki Play tugmasi: qisqa bosish Play/Pauza (yoki Studiyada Yozish/Stop); bosib turish (~0.6 s) Studiya va MP4 yozish rejimini ochadi yoki yopadi.',
+        'Fon va uchuvchi sferalar: bo‘sh fonga qisqa bosish Zen rejimini yoqadi/o‘chiradi; sferalar rejimida animatsiya fonini surish vizual mavzuni almashtiradi; sferaga bosish trekni yoki Play/Pauzani boshqaradi.',
+        'Studiya sahnasi: ramkani (yoki PiP kamerani) sudrab siljiting; ramkaga qisqa bosish shaklni o‘zgartiradi; bosib turish (~0.6 s) o‘lcham, cho‘zish va burish tutqichlarini ochadi; fonga qisqa bosish uslub va neon chiziqni yangilaydi.',
+      ],
+    },
   ],
 };
 
@@ -1174,6 +1351,17 @@ const KK_HELP: HelpMessages = {
         'Жоғарғы панель мен мәзірдегі 5 жолақты эквалайзер (60 Гц – 14 кГц) тыңдау кезінде де, MP4 экспортында да жұмыс істейді.',
         'Audius, қалта және URL көздерін құрылғылар арасында синхрондау үшін Email/құпиясөз не Google арқылы кіріңіз.',
         'Жоғарғы панельден не мәзірден Толық экранды қосыңыз немесе офлайн PWA қолданбасын орнатыңыз.',
+      ],
+    },
+    {
+      id: 'gestures',
+      title: '7. Қимылдар, қысқа және ұзақ басулар',
+      items: [
+        'Шаршы мұқаба: қысқа түрту «Медиа көздерін» ашады; солға/оңға сырғыту (свайп) келесі не алдыңғы тректі (немесе FM станциясын) қосады.',
+        'Төменгі FM батырмасы: қысқа түрту станцияларды ретімен ауыстырады (алдымен сақталған ағындарыңыз, сосын 2 ұлттық + 10 жанрлық); ұзақ басу (~0.6 с) «Көздер → URL» ашады.',
+        'Төменгі Play батырмасы: қысқа түрту Ойнату/Кідірту (немесе Студияда Жазу/Тоқтату); ұзақ басу (~0.6 с) Студия және MP4 жазу режимін ашады немесе жабады.',
+        'Фон және ұшатын шарлар: бос фонды қысқа түрту Дзен режимін қосады/өшіреді; шарлар режимінде анимация фонын сырғыту визуалды тақырыпты ауыстырады; шарды басу тректі не кідіртуді ауыстырады.',
+        'Студия сахнасы: жақтауды (немесе PiP камераны) сүйреп жылжытыңыз; жақтауды қысқа түрту пішінді ауыстырады; ұзақ басу (~0.6 с) өлшем, созу және бұру тұтқаларын ашады; фонды қысқа түрту стиль мен неон жиекті жаңартады.',
       ],
     },
   ],

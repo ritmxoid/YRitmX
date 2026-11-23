@@ -304,14 +304,14 @@ export function SourcesModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-3 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="sources-modal-title"
       onClick={onClose}
     >
       <div
-        className="glass-modal w-full max-w-lg rounded-3xl p-6 relative border border-white/10 max-h-[90vh] overflow-y-auto hide-scrollbar"
+        className="glass-modal w-full max-w-lg rounded-3xl p-4 sm:p-6 relative border border-white/10 max-h-[90vh] overflow-y-auto overflow-x-hidden hide-scrollbar"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
@@ -322,49 +322,49 @@ export function SourcesModal({
             type="button"
             onClick={onClose}
             aria-label={t.closeSourcesLabel}
-            className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
+            className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition cursor-pointer shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* 3 Tabs */}
-        <div className="grid grid-cols-3 gap-1.5 p-1 rounded-2xl bg-white/5 border border-white/10 mb-5">
+        <div className="grid grid-cols-3 gap-1 sm:gap-1.5 p-1 rounded-2xl bg-white/5 border border-white/10 mb-5">
           <button
             type="button"
             onClick={() => onTabChange('audius')}
-            className={`py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+            className={`min-w-0 py-2 px-1.5 sm:px-2 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1 sm:gap-1.5 transition cursor-pointer ${
               activeTab === 'audius'
                 ? 'bg-sky-600 text-white shadow-sm'
                 : 'text-gray-300 hover:text-white'
             }`}
           >
             <Cloud className="w-3.5 h-3.5 shrink-0" />
-            <span>{t.tabAudius}</span>
+            <span className="truncate">{t.tabAudius}</span>
           </button>
           <button
             type="button"
             onClick={() => onTabChange('folder')}
-            className={`py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+            className={`min-w-0 py-2 px-1.5 sm:px-2 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1 sm:gap-1.5 transition cursor-pointer ${
               activeTab === 'folder'
                 ? 'bg-purple-600 text-white shadow-sm'
                 : 'text-gray-300 hover:text-white'
             }`}
           >
             <FolderOpen className="w-3.5 h-3.5 shrink-0" />
-            <span>{t.tabFolder}</span>
+            <span className="truncate">{t.tabFolder}</span>
           </button>
           <button
             type="button"
             onClick={() => onTabChange('url')}
-            className={`py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+            className={`min-w-0 py-2 px-1.5 sm:px-2 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1 sm:gap-1.5 transition cursor-pointer ${
               activeTab === 'url'
                 ? 'bg-emerald-600 text-white shadow-sm'
                 : 'text-gray-300 hover:text-white'
             }`}
           >
             <Globe className="w-3.5 h-3.5 shrink-0" />
-            <span>{t.tabUrl}</span>
+            <span className="truncate">{t.tabUrl}</span>
           </button>
         </div>
 
@@ -372,20 +372,20 @@ export function SourcesModal({
         {activeTab === 'audius' && (
           <div className="space-y-4">
             <p className="text-xs text-gray-400">{t.audiusHint}</p>
-            <form onSubmit={handleAudiusSubmit} className="flex gap-2">
+            <form onSubmit={handleAudiusSubmit} className="flex items-stretch gap-2 min-w-0">
               <input
                 type="text"
                 value={audiusInput}
                 onChange={(e) => setAudiusInput(e.target.value)}
                 placeholder={t.audiusPlaceholder}
-                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-sky-500"
+                className="flex-1 min-w-0 w-full bg-white/5 border border-white/10 rounded-xl px-3 sm:px-3.5 py-2.5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-sky-500"
               />
               <button
                 type="submit"
                 disabled={isLoadingAudius || !audiusInput.trim()}
-                className="px-4 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                className="shrink-0 px-3 sm:px-4 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
               >
-                {isLoadingAudius && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {isLoadingAudius && <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />}
                 <span>{t.loadBtn}</span>
               </button>
             </form>
@@ -619,20 +619,20 @@ export function SourcesModal({
               <strong>JSON / M3U / RSS</strong> {t.urlHintHtmlParts.orDirect}
             </p>
 
-            <form onSubmit={handleUrlSubmit} className="flex gap-2">
+            <form onSubmit={handleUrlSubmit} className="flex items-stretch gap-2 min-w-0">
               <input
                 type="text"
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
                 placeholder={t.urlPlaceholder}
-                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-emerald-500"
+                className="flex-1 min-w-0 w-full bg-white/5 border border-white/10 rounded-xl px-3 sm:px-3.5 py-2.5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-emerald-500"
               />
               <button
                 type="submit"
                 disabled={isLoadingUrl || !urlInput.trim()}
-                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                className="shrink-0 px-3 sm:px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
               >
-                {isLoadingUrl && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {isLoadingUrl && <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />}
                 <span>{t.loadBtn}</span>
               </button>
             </form>
