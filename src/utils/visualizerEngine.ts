@@ -51,6 +51,95 @@ export interface NeuralNode {
   colorIdx: number;
 }
 
+export interface HexSubBranch {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  cx: number;
+  cy: number;
+  r: number;
+  theta: number;
+  hasInnerRing: boolean;
+  glowTip: boolean;
+}
+
+export interface HexBranch {
+  vertexIdx: number;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  cx: number;
+  cy: number;
+  r: number;
+  theta: number;
+  hasInnerRing: boolean;
+  glowTip: boolean;
+  subBranch: HexSubBranch | null;
+}
+
+export interface HexPrimaryNode {
+  ox: number;
+  oy: number;
+  r: number;
+  theta: number;
+  lineWidth: number;
+  glowVertexIdx: number;
+  hasSecondaryFlare: boolean;
+  secondaryVertexIdx: number;
+  hasInnerRing: boolean;
+  innerRingRatio: number;
+}
+
+export interface HexCluster {
+  id: number;
+  mode: 'linear' | 'orbital' | 'arc';
+  nx: number;
+  ny: number;
+  vx: number;
+  vy: number;
+  orbitRadiusX: number;
+  orbitRadiusY: number;
+  orbitFreq: number;
+  arcAmpX: number;
+  arcAmpY: number;
+  arcFreq: number;
+  phase: number;
+  speedMult: number;
+  minFactor: number;
+  maxFactor: number;
+  scaleFreq: number;
+  rotBase: number;
+  rotSpeed: number;
+  hueOffset: number;
+  hexNodes: HexPrimaryNode[];
+  branches: HexBranch[];
+}
+
+export interface HexBokehItem {
+  isRing: boolean;
+  nx: number;
+  ny: number;
+  vx: number;
+  vy: number;
+  phase: number;
+  radiusFactor: number;
+  scaleAmp: number;
+  scaleFreq: number;
+  alphaBase: number;
+  hueOffset: number;
+  layer: number;
+}
+
+export interface HexLatticeCache {
+  seedKey: number;
+  baseHue: number;
+  hueDriftRate: number;
+  bokehItems: HexBokehItem[];
+  clusters: HexCluster[];
+}
+
 export interface VisualizerSimState {
   freqData: Uint8Array<ArrayBuffer>;
   timeData: Uint8Array<ArrayBuffer>;
@@ -70,6 +159,8 @@ export interface VisualizerSimState {
   anchorY: number;
   softFrameCanvas?: HTMLCanvasElement;
   softMaskCanvas?: HTMLCanvasElement;
+  spectrumCanvas?: HTMLCanvasElement;
+  hexLatticeCaches?: Record<number, HexLatticeCache>;
 }
 
 export interface RenderVisualizerFrameParams {
@@ -161,6 +252,282 @@ function hsla(hex: string, hueShift: number, alpha: number, satBoost = 0, lightB
 function seededUnit(seed: number, index: number): number {
   const x = Math.sin(seed * 12.9898 + index * 78.233) * 43758.5453;
   return x - Math.floor(x);
+}
+
+const HEX_SCALE_REGIMES = ['small-to-medium', 'medium', 'large-to-medium', 'extreme'] as const;
+
+function hexWrapHue(deg: number): number {
+  return ((deg % 360) + 360) % 360;
+}
+
+function createHexSeededRandom(seedValue: number): () => number {
+  let a = Math.imul(Math.floor(Number(seedValue) * 1000) ^ 0x9e3779b9, 0x85ebca6b) >>> 0;
+  if (a === 0) a = 0x12345678;
+
+  return function nextRand(): number {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function getHexSeedConfig(seedValue: number) {
+  const rand = createHexSeededRandom(Number(seedValue) || 1);
+  const regimeIndex = Math.floor(rand() * HEX_SCALE_REGIMES.length);
+  const regime = HEX_SCALE_REGIMES[regimeIndex];
+  const zoomProfile = Math.pow(rand(), 1.05);
+  const structureCount = 1 + Math.floor(rand() * 10);
+
+  return {
+    regime,
+    zoomProfile,
+    structureCount,
+  };
+}
+
+function getHexVertex(
+  cx: number,
+  cy: number,
+  r: number,
+  k: number,
+  rotation = 0,
+  theta = -Math.PI / 6
+): { x: number; y: number; angle: number } {
+  const angle = theta + rotation + (k * Math.PI) / 3;
+  return {
+    x: cx + Math.cos(angle) * r,
+    y: cy + Math.sin(angle) * r,
+    angle,
+  };
+}
+
+function buildHexLatticeCache(seedKey: number): HexLatticeCache {
+  const rand = createHexSeededRandom(seedKey);
+  const { regime, zoomProfile, structureCount } = getHexSeedConfig(seedKey);
+
+  const baseHue = 196 + (rand() - 0.5) * 38;
+  const hueDriftRate = 7 + rand() * 14;
+  const trajectoryModes: Array<'linear' | 'orbital' | 'arc'> = ['linear', 'orbital', 'arc'];
+
+  const bokehCount = 18 + Math.floor(rand() * 8);
+  const bokehItems: HexBokehItem[] = Array.from({ length: bokehCount }, (_, idx) => ({
+    isRing: rand() > 0.55,
+    nx: rand(),
+    ny: rand(),
+    vx: (rand() - 0.5) * 0.022,
+    vy: (rand() - 0.5) * 0.022,
+    phase: rand() * Math.PI * 2,
+    radiusFactor: 0.02 + rand() * 0.08,
+    scaleAmp: 0.12 + rand() * 0.22,
+    scaleFreq: 0.4 + rand() * 0.75,
+    alphaBase: 0.045 + rand() * 0.085,
+    hueOffset: (rand() - 0.5) * 48,
+    layer: idx % 2,
+  }));
+
+  const clusters: HexCluster[] = Array.from({ length: structureCount }, (_, cIdx) => {
+    const mode = trajectoryModes[Math.floor(rand() * trajectoryModes.length)];
+    const baseRadius = 22 + rand() * 28;
+    const speedMult = 0.55 + rand() * 1.1;
+    const theta = -Math.PI / 6;
+
+    let minFactor = 0.08;
+    let maxFactor = 0.24;
+
+    if (regime === 'small-to-medium') {
+      const microFloor = 0.032 + rand() * 0.028;
+      const medCeiling = 0.16 + rand() * 0.11;
+      const spanBlend = 0.45 + 0.55 * zoomProfile;
+      minFactor = microFloor;
+      maxFactor = microFloor + (medCeiling - microFloor) * spanBlend;
+    } else if (regime === 'medium') {
+      const centerMed = 0.22 + rand() * 0.14;
+      const halfSpan = (0.045 + rand() * 0.065) * (0.45 + 0.65 * zoomProfile);
+      minFactor = Math.max(0.11, centerMed - halfSpan);
+      maxFactor = Math.min(0.46, centerMed + halfSpan);
+    } else if (regime === 'large-to-medium') {
+      const medFloor = 0.24 + rand() * 0.12;
+      const largeCeiling = 0.52 + rand() * 0.26;
+      const spanBlend = 0.45 + 0.55 * zoomProfile;
+      minFactor = medFloor;
+      maxFactor = medFloor + (largeCeiling - medFloor) * spanBlend;
+    } else {
+      const pinpointFloor = 0.025 + rand() * 0.025;
+      const oversizedCeiling = 1.05 + rand() * 0.2;
+      const spanBlend = 0.55 + 0.45 * zoomProfile;
+      minFactor = pinpointFloor;
+      maxFactor = pinpointFloor + (oversizedCeiling - pinpointFloor) * spanBlend;
+    }
+
+    const scaleFreq = 0.22 + rand() * 0.42;
+    const rotSpeed = (rand() - 0.5) * 0.26;
+    const hueOffset = (rand() - 0.5) * 68;
+
+    const primaryHex: HexPrimaryNode = {
+      ox: 0,
+      oy: 0,
+      r: baseRadius,
+      theta,
+      lineWidth: 2.2 + rand() * 1.0,
+      glowVertexIdx: Math.floor(rand() * 6),
+      hasSecondaryFlare: rand() > 0.4,
+      secondaryVertexIdx: Math.floor(rand() * 6),
+      hasInnerRing: rand() > 0.62,
+      innerRingRatio: 0.58 + rand() * 0.16,
+    };
+
+    const hexNodes: HexPrimaryNode[] = [primaryHex];
+    const usedVertices = new Set<number>();
+    const desiredSpokes = 2 + Math.floor(rand() * 4);
+    const branches: HexBranch[] = [];
+
+    for (let bIdx = 0; bIdx < desiredSpokes; bIdx++) {
+      let k = Math.floor(rand() * 6);
+      let guard = 0;
+      while (usedVertices.has(k) && guard < 12) {
+        k = (k + 1) % 6;
+        guard++;
+      }
+      if (usedVertices.has(k)) break;
+      usedVertices.add(k);
+
+      const vertex = getHexVertex(primaryHex.ox, primaryHex.oy, primaryHex.r, k, 0, theta);
+      const radialAngle = vertex.angle;
+      const armLen = primaryHex.r * (0.72 + rand() * 0.85);
+      const childHexRadius = primaryHex.r * (0.34 + rand() * 0.28);
+
+      const childCenterDist = armLen + childHexRadius;
+      const childCx = vertex.x + Math.cos(radialAngle) * childCenterDist;
+      const childCy = vertex.y + Math.sin(radialAngle) * childCenterDist;
+
+      const oppositeK = (k + 3) % 6;
+      const childAnchor = getHexVertex(childCx, childCy, childHexRadius, oppositeK, 0, theta);
+
+      let subBranch: HexSubBranch | null = null;
+      if (rand() > 0.46) {
+        const subK = (k + (rand() > 0.5 ? 1 : 5)) % 6;
+        if (subK !== oppositeK) {
+          const subStart = getHexVertex(childCx, childCy, childHexRadius, subK, 0, theta);
+          const subLen = childHexRadius * (1.05 + rand() * 1.15);
+          const subHexR = Math.max(5, childHexRadius * (0.42 + rand() * 0.22));
+          const subCenterDist = subLen + subHexR;
+          const subCx = subStart.x + Math.cos(subStart.angle) * subCenterDist;
+          const subCy = subStart.y + Math.sin(subStart.angle) * subCenterDist;
+          const subOppK = (subK + 3) % 6;
+          const subAnchor = getHexVertex(subCx, subCy, subHexR, subOppK, 0, theta);
+
+          subBranch = {
+            startX: subStart.x,
+            startY: subStart.y,
+            endX: subAnchor.x,
+            endY: subAnchor.y,
+            cx: subCx,
+            cy: subCy,
+            r: subHexR,
+            theta,
+            hasInnerRing: rand() > 0.7,
+            glowTip: rand() > 0.35,
+          };
+        }
+      }
+
+      branches.push({
+        vertexIdx: k,
+        startX: vertex.x,
+        startY: vertex.y,
+        endX: childAnchor.x,
+        endY: childAnchor.y,
+        cx: childCx,
+        cy: childCy,
+        r: childHexRadius,
+        theta,
+        hasInnerRing: rand() > 0.58,
+        glowTip: rand() > 0.3,
+        subBranch,
+      });
+    }
+
+    return {
+      id: cIdx,
+      mode,
+      nx: 0.08 + rand() * 0.84,
+      ny: 0.08 + rand() * 0.84,
+      vx: (rand() - 0.5) * 0.055,
+      vy: (rand() - 0.5) * 0.055,
+      orbitRadiusX: 0.05 + rand() * 0.14,
+      orbitRadiusY: 0.05 + rand() * 0.14,
+      orbitFreq: 0.22 + rand() * 0.35,
+      arcAmpX: 0.04 + rand() * 0.09,
+      arcAmpY: 0.04 + rand() * 0.09,
+      arcFreq: 0.28 + rand() * 0.4,
+      phase: rand() * Math.PI * 2,
+      speedMult,
+      minFactor,
+      maxFactor,
+      scaleFreq,
+      rotBase: (rand() - 0.5) * 0.7,
+      rotSpeed,
+      hueOffset,
+      hexNodes,
+      branches,
+    };
+  });
+
+  return {
+    seedKey,
+    baseHue,
+    hueDriftRate,
+    bokehItems,
+    clusters,
+  };
+}
+
+function traceHexagonPath(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+  rotation = 0,
+  theta = -Math.PI / 6
+): void {
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const v = getHexVertex(cx, cy, r, i, rotation, theta);
+    if (i === 0) ctx.moveTo(v.x, v.y);
+    else ctx.lineTo(v.x, v.y);
+  }
+  ctx.closePath();
+}
+
+function drawHexNodeFlare(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  hue: number,
+  sat: number,
+  alpha: number,
+  lineScale = 1
+): void {
+  const safeRadius = Math.max(0.75, radius * lineScale);
+  const outerR = Math.max(2.4, safeRadius * 4.2);
+  const grad = ctx.createRadialGradient(x, y, 0.25, x, y, outerR);
+  grad.addColorStop(0, `hsla(${hexWrapHue(hue - 10).toFixed(1)}, 100%, 96%, ${Math.min(1, alpha * 0.95).toFixed(3)})`);
+  grad.addColorStop(0.25, `hsla(${hue.toFixed(1)}, ${sat.toFixed(0)}%, 68%, ${(alpha * 0.65).toFixed(3)})`);
+  grad.addColorStop(0.65, `hsla(${hexWrapHue(hue + 14).toFixed(1)}, ${sat.toFixed(0)}%, 52%, ${(alpha * 0.18).toFixed(3)})`);
+  grad.addColorStop(1, `hsla(${hue.toFixed(1)}, ${sat.toFixed(0)}%, 50%, 0)`);
+
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(x, y, outerR, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = `hsla(${hexWrapHue(hue - 15).toFixed(1)}, 100%, 98%, ${Math.min(1, alpha).toFixed(3)})`;
+  ctx.beginPath();
+  ctx.arc(x, y, Math.max(1.15, safeRadius * 0.75), 0, Math.PI * 2);
+  ctx.fill();
 }
 
 export function createVisualizerSimState(width: number, height: number): VisualizerSimState {
@@ -1087,6 +1454,441 @@ export function stepAndRenderVisualizerFrame(params: RenderVisualizerFrameParams
         ctx.stroke();
       }
       ctx.restore();
+    } else if (mode === 28) {
+      // 29. Flowing Spectrum (Canvas 2D scaled multi-layer silk/smoke waves with random DNA)
+      const scale = Math.min(0.45, 720 / Math.max(1, width, height));
+      const sw = Math.max(1, Math.floor(width * scale));
+      const sh = Math.max(1, Math.floor(height * scale));
+      if (!sim.spectrumCanvas && typeof document !== 'undefined') {
+        sim.spectrumCanvas = document.createElement('canvas');
+      }
+      const specCanvas = sim.spectrumCanvas;
+      const sCtx = specCanvas?.getContext('2d');
+      if (specCanvas && sCtx) {
+        if (specCanvas.width !== sw || specCanvas.height !== sh) {
+          specCanvas.width = sw;
+          specCanvas.height = sh;
+        }
+        sCtx.save();
+        sCtx.setTransform(1, 0, 0, 1, 0, 0);
+        sCtx.filter = 'none';
+        sCtx.globalCompositeOperation = 'source-over';
+        sCtx.globalAlpha = 1;
+        sCtx.clearRect(0, 0, sw, sh);
+
+        const s = seed + colorOffset * 13.7;
+        const time = s * 10 + phase * 0.42;
+        const vibrancy = Math.max(0.4, glow);
+
+        const [pHue0, pSat0] = hexToHsl(palette[0]);
+        const [, pSat1] = hexToHsl(palette[1]);
+        const isMono = pSat0 < 8 && pSat1 < 8;
+        const paletteShift = pIdx === 0 || isMono ? 0 : pHue0 - 270;
+        const totalHueShift = hueShift + hueOffset + paletteShift;
+
+        const sat = isMono ? 4 : Math.min(95, Math.max(25, 42 + vibrancy * 28));
+        const lightShift = (vibrancy - 1) * -6;
+
+        // Random blur character per DNA seed: from crisp silk waves (0) to smoky mist (1)
+        const iterationSmoke = (((Math.sin(s * 91.7) * 43758.5453) % 1) + 1) % 1;
+        const baseLayerCount = 6 + Math.floor(iterationSmoke * 4); // 6..9 layers
+        const layerCount = Math.max(4, Math.min(11, Math.round(baseLayerCount * (0.65 + den * 0.35))));
+
+        const mixCount = dna.mixLayers?.length ?? 0;
+        if (colorOffset === 0) {
+          const bgAlpha = hasCustomBackdrop ? 0.32 : mixCount > 0 ? 0.56 : 1;
+          const bgGrad = sCtx.createLinearGradient(0, 0, sw, sh);
+          const baseHue1 = (((24 + s * 31 + time * 14 + totalHueShift) % 360) + 360) % 360;
+          const baseHue2 = (((202 + s * 19 + time * 11 + totalHueShift) % 360) + 360) % 360;
+          bgGrad.addColorStop(
+            0,
+            `hsla(${baseHue2.toFixed(1)}, ${Math.min(80, sat * 0.85).toFixed(0)}%, ${Math.max(8, 22 + lightShift * 0.5).toFixed(0)}%, ${bgAlpha})`
+          );
+          bgGrad.addColorStop(
+            0.55,
+            `hsla(${((baseHue1 + baseHue2) * 0.5 % 360).toFixed(1)}, ${Math.min(72, sat * 0.72).toFixed(0)}%, ${Math.max(6, 15 + lightShift * 0.4).toFixed(0)}%, ${bgAlpha})`
+          );
+          bgGrad.addColorStop(
+            1,
+            `hsla(${baseHue1.toFixed(1)}, ${Math.min(78, sat * 0.8).toFixed(0)}%, ${Math.max(8, 18 + lightShift * 0.5).toFixed(0)}%, ${bgAlpha})`
+          );
+          sCtx.fillStyle = bgGrad;
+          sCtx.fillRect(0, 0, sw, sh);
+        }
+
+        const freqNorm = 480 / Math.max(160, sw);
+        const blurScale = Math.max(0.45, sw / 540);
+        const xStep = Math.max(4, Math.floor(sw / 46));
+        const audioAmpBoost = 1 + smoothBass * 0.45 * dyn;
+
+        for (let i = 0; i < layerCount; i++) {
+          const randA = (((Math.sin((s + 1) * (i + 3) * 19.31) * 12345.67) % 1) + 1) % 1;
+          const randB = (((Math.cos((s + 5) * (i + 7) * 41.17) * 98765.43) % 1) + 1) % 1;
+          const layerBlurMix = Math.min(1, Math.max(0, iterationSmoke * (0.45 + randA * 0.9)));
+
+          const lPhase = s * 0.37 + i * 1.15;
+          const freqX = (0.002 + randA * 0.0022) * freqNorm;
+          const freqY = (0.0015 + randB * 0.0018) * freqNorm;
+          const amp = (0.12 + randA * 0.12) * audioAmpBoost;
+          const baseY = -0.06 + (i / Math.max(1, layerCount - 1)) * 0.9;
+          const heightScale = 0.24 + (0.16 + iterationSmoke * 0.36) + randB * 0.16;
+          const alphaScale = 1 - layerBlurMix * 0.38;
+          const blurPx = layerBlurMix * 28 * blurScale;
+          const layerHueOffset = (s * 47 + i * 52) % 360;
+
+          const lHue1 = (((layerHueOffset + time * (12 + i * 1.5) + totalHueShift) % 360) + 360) % 360;
+          const lHue2 = (((lHue1 + 48 + randB * 55) % 360) + 360) % 360;
+          const lAlpha = Math.min(0.85, (0.28 + randA * 0.24 + smoothMid * 0.12) * alphaScale * Math.min(1.25, vibrancy));
+
+          const bandH = sh * heightScale;
+          const pad = Math.ceil(blurPx * 1.8) + 16;
+
+          sCtx.save();
+          sCtx.globalCompositeOperation = i % 2 === 0 ? 'source-over' : 'overlay';
+          if ('filter' in sCtx) {
+            sCtx.filter = blurPx > 0.6 ? `blur(${blurPx.toFixed(1)}px)` : 'none';
+          }
+
+          const yGradTop = sh * baseY - sh * amp * 0.9;
+          const yGradBot = sh * baseY + bandH + sh * amp * 0.9;
+          const layerGrad = sCtx.createLinearGradient(0, yGradTop, 0, yGradBot);
+          layerGrad.addColorStop(0, `hsla(${lHue1.toFixed(1)}, ${sat.toFixed(0)}%, ${Math.min(82, 58 + lightShift).toFixed(0)}%, 0)`);
+          layerGrad.addColorStop(0.24, `hsla(${lHue1.toFixed(1)}, ${sat.toFixed(0)}%, ${Math.min(78, 52 + lightShift).toFixed(0)}%, ${lAlpha.toFixed(3)})`);
+          layerGrad.addColorStop(0.68, `hsla(${lHue2.toFixed(1)}, ${Math.min(98, sat + 6).toFixed(0)}%, ${Math.max(22, 44 + lightShift).toFixed(0)}%, ${(lAlpha * 0.88).toFixed(3)})`);
+          layerGrad.addColorStop(1, `hsla(${lHue2.toFixed(1)}, ${sat.toFixed(0)}%, ${Math.max(16, 32 + lightShift).toFixed(0)}%, 0)`);
+
+          sCtx.fillStyle = layerGrad;
+          sCtx.beginPath();
+
+          for (let x = -pad; x <= sw + pad + xStep; x += xStep) {
+            const clampedX = Math.max(0, Math.min(sw - 1, x));
+            const bin = freqData[Math.min(127, Math.floor((clampedX / sw) * 96))] / 255;
+            const yTop =
+              sh * baseY +
+              (Math.sin(x * freqX * 6.28 + time * (0.9 + i * 0.08) + lPhase) * 0.58 +
+                Math.cos(x * freqX * 10.4 - time * 0.55 + lPhase * 1.3) * 0.28 +
+                Math.sin(x * freqY * 14.2 + time * 0.38 + s * 0.3) * 0.14) *
+                sh *
+                amp +
+              (bin - 0.3) * sh * 0.045 * dyn;
+            if (x === -pad) sCtx.moveTo(x, yTop);
+            else sCtx.lineTo(x, yTop);
+          }
+
+          for (let x = sw + pad + xStep; x >= -pad; x -= xStep) {
+            const clampedX = Math.max(0, Math.min(sw - 1, x));
+            const bin = freqData[Math.min(127, Math.floor((clampedX / sw) * 96))] / 255;
+            const yBottom =
+              sh * baseY +
+              bandH +
+              (Math.cos(x * freqX * 5.1 - time * (0.72 + i * 0.06) + lPhase * 1.6) * 0.55 +
+                Math.sin(x * freqY * 11.8 + time * 0.48 + lPhase) * 0.3 +
+                Math.cos(x * freqX * 16.5 + time * 0.3) * 0.15) *
+                sh *
+                amp *
+                0.85 +
+              bin * sh * 0.03 * dyn;
+            sCtx.lineTo(x, yBottom);
+          }
+
+          sCtx.closePath();
+          sCtx.fill();
+          sCtx.restore();
+        }
+
+        sCtx.restore();
+        ctx.drawImage(specCanvas, 0, 0, width, height);
+      }
+    } else if (mode === 29) {
+      // 30. Magic Hexagon (Molecular Hexagonal Lattice with seeded scale regimes, bokeh & exact 6-vertex spokes)
+      const s = seed + colorOffset * 17.3;
+      if (!sim.hexLatticeCaches) {
+        sim.hexLatticeCaches = {};
+      }
+      let cache = sim.hexLatticeCaches[colorOffset];
+      if (!cache || cache.seedKey !== s) {
+        cache = buildHexLatticeCache(s);
+        sim.hexLatticeCaches[colorOffset] = cache;
+      }
+
+      const elapsed = s * 1.37 + phase * 0.85;
+      const vibrancy = Math.max(0.35, glow);
+      const motionScale = 1;
+      const maxDim = Math.max(width, height);
+      const dprApprox = Math.max(1, Math.min(1.5, minDim / 720));
+
+      const [pHue0, pSat0] = hexToHsl(palette[0]);
+      const [, pSat1] = hexToHsl(palette[1]);
+      const isMono = pSat0 < 8 && pSat1 < 8;
+      const paletteShift = pIdx === 0 || isMono ? 0 : pHue0 - 196;
+      const totalHueShift = hueShift + hueOffset + paletteShift;
+
+      const sat = isMono ? 4 : Math.min(100, Math.max(35, 58 + vibrancy * 32));
+      const activeBaseHue = hexWrapHue(
+        cache.baseHue + elapsed * cache.hueDriftRate * (0.4 + vibrancy * 0.6) + totalHueShift
+      );
+      const accentHue = hexWrapHue(activeBaseHue - 24);
+      const deepHue = hexWrapHue(activeBaseHue + 12);
+
+      // 1. Deep radial glow background (skipped on secondary mix layers so underlying layers stay visible)
+      const mixCount = dna.mixLayers?.length ?? 0;
+      if (colorOffset === 0) {
+        const bgAlpha = hasCustomBackdrop ? 0.32 : mixCount > 0 ? 0.56 : 1;
+        const bgGrad = ctx.createRadialGradient(
+          width * (0.82 + Math.sin(elapsed * 0.25) * 0.08),
+          height * (0.58 + Math.cos(elapsed * 0.22) * 0.08),
+          minDim * 0.04,
+          width * 0.45,
+          height * 0.5,
+          maxDim * 1.15
+        );
+        const l0 = Math.min(62, Math.max(24, 44 + (vibrancy - 1) * 5 + smoothBass * 6));
+        const l1 = Math.min(40, Math.max(12, 22 + (vibrancy - 1) * 3));
+        bgGrad.addColorStop(
+          0,
+          `hsla(${accentHue.toFixed(1)}, ${Math.min(100, sat * 1.05).toFixed(0)}%, ${l0.toFixed(1)}%, ${bgAlpha})`
+        );
+        bgGrad.addColorStop(
+          0.35,
+          `hsla(${activeBaseHue.toFixed(1)}, ${Math.min(95, sat * 0.92).toFixed(0)}%, ${l1.toFixed(1)}%, ${bgAlpha})`
+        );
+        bgGrad.addColorStop(
+          0.75,
+          `hsla(${deepHue.toFixed(1)}, ${Math.min(90, sat * 0.8).toFixed(0)}%, 9%, ${bgAlpha})`
+        );
+        bgGrad.addColorStop(
+          1,
+          `hsla(${hexWrapHue(deepHue + 8).toFixed(1)}, ${Math.min(85, sat * 0.72).toFixed(0)}%, 5%, ${bgAlpha})`
+        );
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      // 2. Bokeh circles & rings distributed across full width and height
+      const bokehCount = Math.max(
+        6,
+        Math.min(cache.bokehItems.length, Math.round(cache.bokehItems.length * Math.min(1, 0.45 + den * 0.55)))
+      );
+      for (let i = 0; i < bokehCount; i++) {
+        const b = cache.bokehItems[i];
+        const tLocal = elapsed * (0.55 + (i % 4) * 0.18) * (0.5 + motionScale * 0.5);
+        const bx = ((((b.nx + b.vx * tLocal + 0.12) % 1.24) + 1.24) % 1.24) - 0.12;
+        const by =
+          ((((b.ny + b.vy * tLocal + Math.sin(tLocal * 0.7 + b.phase) * 0.04 + 0.12) % 1.24) +
+            1.24) %
+            1.24) -
+          0.12;
+
+        const scaleWave =
+          1 + Math.sin(elapsed * b.scaleFreq * (0.5 + motionScale * 0.5) + b.phase) * b.scaleAmp;
+        const r = Math.max(4, minDim * b.radiusFactor * scaleWave);
+        const bHue = hexWrapHue(activeBaseHue + b.hueOffset + Math.sin(elapsed * 0.3 + b.phase) * 18);
+        const alpha =
+          b.alphaBase *
+          (0.75 + 0.25 * Math.cos(elapsed * 0.8 + b.phase)) *
+          Math.min(1.4, 0.6 + vibrancy * 0.5);
+
+        const px = bx * width;
+        const py = by * height;
+
+        if (b.isRing) {
+          ctx.strokeStyle = `hsla(${bHue.toFixed(1)}, ${sat.toFixed(0)}%, 68%, ${(alpha * 1.25).toFixed(3)})`;
+          ctx.lineWidth = Math.max(1, dprApprox * 1.2);
+          ctx.beginPath();
+          ctx.arc(px, py, r, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          const discGrad = ctx.createRadialGradient(px, py, r * 0.1, px, py, r);
+          discGrad.addColorStop(0, `hsla(${bHue.toFixed(1)}, ${sat.toFixed(0)}%, 62%, ${(alpha * 1.15).toFixed(3)})`);
+          discGrad.addColorStop(0.7, `hsla(${bHue.toFixed(1)}, ${sat.toFixed(0)}%, 46%, ${(alpha * 0.55).toFixed(3)})`);
+          discGrad.addColorStop(1, `hsla(${bHue.toFixed(1)}, ${sat.toFixed(0)}%, 35%, 0)`);
+          ctx.fillStyle = discGrad;
+          ctx.beginPath();
+          ctx.arc(px, py, r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // 3. Flying, scaling, color-shifting hexagonal molecular structures
+      ctx.globalCompositeOperation = 'lighter';
+      const activeClusterCount = Math.max(
+        1,
+        Math.min(cache.clusters.length, Math.round(cache.clusters.length * Math.min(1, 0.55 + den * 0.45)))
+      );
+      const audioScaleBoost = 1 + smoothBass * 0.1;
+
+      for (let c = 0; c < activeClusterCount; c++) {
+        const cl = cache.clusters[c];
+        const localTime = elapsed * cl.speedMult * (0.45 + motionScale * 0.65);
+
+        let tx = cl.nx;
+        let ty = cl.ny;
+
+        if (cl.mode === 'linear') {
+          tx = cl.nx + cl.vx * localTime * 2.2;
+          ty =
+            cl.ny +
+            cl.vy * localTime * 2.2 +
+            Math.sin(localTime * 0.6 + cl.phase) * 0.04 * motionScale;
+        } else if (cl.mode === 'orbital') {
+          const ang = localTime * cl.orbitFreq + cl.phase;
+          tx =
+            cl.nx +
+            Math.cos(ang) * cl.orbitRadiusX * motionScale +
+            cl.vx * localTime * 0.7;
+          ty =
+            cl.ny +
+            Math.sin(ang) * cl.orbitRadiusY * motionScale +
+            cl.vy * localTime * 0.7;
+        } else {
+          const prog = localTime * cl.arcFreq + cl.phase;
+          tx =
+            cl.nx +
+            cl.vx * localTime * 1.8 +
+            Math.cos(prog * 0.7) * cl.arcAmpX * motionScale;
+          ty =
+            cl.ny +
+            cl.vy * localTime * 1.4 +
+            Math.sin(prog) * cl.arcAmpY * motionScale;
+        }
+
+        const wrappedX = ((((tx + 0.16) % 1.32) + 1.32) % 1.32) - 0.16;
+        const wrappedY = ((((ty + 0.16) % 1.32) + 1.32) % 1.32) - 0.16;
+
+        const cx = wrappedX * width;
+        const cy = wrappedY * height;
+
+        const cycleWave = 0.5 + 0.5 * Math.sin(localTime * cl.scaleFreq + cl.phase);
+        const easedWave = cycleWave * cycleWave * (3 - 2 * cycleWave);
+        const spanRatio = cl.minFactor + (cl.maxFactor - cl.minFactor) * easedWave;
+        const targetSpanPx =
+          spanRatio *
+          maxDim *
+          Math.max(0.3, Math.min(1.5, 0.65 + motionScale * 0.35)) *
+          audioScaleBoost;
+        const finalScale = Math.max(0.025, targetSpanPx / (cl.hexNodes[0].r * 2));
+
+        const inverseLineScale = Math.min(32, Math.max(1, 0.85 / finalScale));
+        const rotation = cl.rotBase + localTime * cl.rotSpeed * motionScale;
+
+        const structHue = hexWrapHue(
+          activeBaseHue +
+            cl.hueOffset +
+            Math.sin(elapsed * 0.35 + cl.phase) * 32 +
+            Math.cos(localTime * 0.25) * 18
+        );
+        const secondaryHue = hexWrapHue(structHue + 28);
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(rotation);
+        ctx.scale(finalScale, finalScale);
+
+        const strokeGrad = ctx.createLinearGradient(-70, -70, 70, 70);
+        strokeGrad.addColorStop(0, `hsla(${structHue.toFixed(1)}, ${sat.toFixed(0)}%, 66%, 0.88)`);
+        strokeGrad.addColorStop(
+          0.5,
+          `hsla(${hexWrapHue(structHue - 12).toFixed(1)}, ${isMono ? 4 : 100}%, 74%, 0.95)`
+        );
+        strokeGrad.addColorStop(1, `hsla(${secondaryHue.toFixed(1)}, ${sat.toFixed(0)}%, 60%, 0.78)`);
+
+        for (let h = 0; h < cl.hexNodes.length; h++) {
+          const hn = cl.hexNodes[h];
+          traceHexagonPath(ctx, hn.ox, hn.oy, hn.r, 0, hn.theta);
+          ctx.strokeStyle = strokeGrad;
+          ctx.lineWidth = hn.lineWidth * inverseLineScale;
+          ctx.stroke();
+
+          if (hn.hasInnerRing) {
+            traceHexagonPath(ctx, hn.ox, hn.oy, hn.r * hn.innerRingRatio, 0, hn.theta);
+            ctx.strokeStyle = `hsla(${structHue.toFixed(1)}, ${sat.toFixed(0)}%, 68%, 0.45)`;
+            ctx.lineWidth = Math.max(0.6, hn.lineWidth * 0.55) * inverseLineScale;
+            ctx.stroke();
+          }
+
+          const innerGrad = ctx.createRadialGradient(hn.ox, hn.oy, 1, hn.ox, hn.oy, hn.r * 1.15);
+          innerGrad.addColorStop(0, `hsla(${structHue.toFixed(1)}, ${sat.toFixed(0)}%, 65%, 0.14)`);
+          innerGrad.addColorStop(1, `hsla(${structHue.toFixed(1)}, ${sat.toFixed(0)}%, 50%, 0)`);
+          ctx.fillStyle = innerGrad;
+          ctx.fill();
+
+          const pulseAlpha = Math.min(
+            1,
+            (0.72 + 0.28 * Math.sin(elapsed * 2.4 + cl.phase + h)) * (1 + smoothBass * 0.22)
+          );
+          const v1 = getHexVertex(hn.ox, hn.oy, hn.r, hn.glowVertexIdx, 0, hn.theta);
+          drawHexNodeFlare(ctx, v1.x, v1.y, 4.2, structHue, sat, pulseAlpha, inverseLineScale);
+
+          if (hn.hasSecondaryFlare) {
+            const v2 = getHexVertex(hn.ox, hn.oy, hn.r, hn.secondaryVertexIdx, 0, hn.theta);
+            drawHexNodeFlare(
+              ctx,
+              v2.x,
+              v2.y,
+              2.6,
+              secondaryHue,
+              sat,
+              pulseAlpha * 0.85,
+              inverseLineScale
+            );
+          }
+        }
+
+        for (let b = 0; b < cl.branches.length; b++) {
+          const br = cl.branches[b];
+
+          ctx.strokeStyle = `hsla(${structHue.toFixed(1)}, ${sat.toFixed(0)}%, 66%, 0.74)`;
+          ctx.lineWidth = 1.45 * inverseLineScale;
+          ctx.beginPath();
+          ctx.moveTo(br.startX, br.startY);
+          ctx.lineTo(br.endX, br.endY);
+          ctx.stroke();
+
+          traceHexagonPath(ctx, br.cx, br.cy, br.r, 0, br.theta);
+          ctx.strokeStyle = strokeGrad;
+          ctx.lineWidth = 1.45 * inverseLineScale;
+          ctx.stroke();
+
+          if (br.hasInnerRing) {
+            traceHexagonPath(ctx, br.cx, br.cy, br.r * 0.62, 0, br.theta);
+            ctx.strokeStyle = `hsla(${secondaryHue.toFixed(1)}, ${sat.toFixed(0)}%, 68%, 0.42)`;
+            ctx.lineWidth = 1.0 * inverseLineScale;
+            ctx.stroke();
+          }
+
+          if (br.glowTip) {
+            drawHexNodeFlare(ctx, br.endX, br.endY, 2.4, structHue, sat, 0.82, inverseLineScale);
+          }
+
+          if (br.subBranch) {
+            const sb = br.subBranch;
+            ctx.strokeStyle = `hsla(${secondaryHue.toFixed(1)}, ${sat.toFixed(0)}%, 66%, 0.68)`;
+            ctx.lineWidth = 1.25 * inverseLineScale;
+            ctx.beginPath();
+            ctx.moveTo(sb.startX, sb.startY);
+            ctx.lineTo(sb.endX, sb.endY);
+            ctx.stroke();
+
+            traceHexagonPath(ctx, sb.cx, sb.cy, sb.r, 0, sb.theta);
+            ctx.strokeStyle = strokeGrad;
+            ctx.lineWidth = 1.25 * inverseLineScale;
+            ctx.stroke();
+
+            if (sb.hasInnerRing) {
+              traceHexagonPath(ctx, sb.cx, sb.cy, sb.r * 0.6, 0, sb.theta);
+              ctx.strokeStyle = `hsla(${structHue.toFixed(1)}, ${sat.toFixed(0)}%, 70%, 0.4)`;
+              ctx.lineWidth = 0.9 * inverseLineScale;
+              ctx.stroke();
+            }
+
+            if (sb.glowTip) {
+              drawHexNodeFlare(ctx, sb.endX, sb.endY, 2.0, secondaryHue, sat, 0.75, inverseLineScale);
+            }
+          }
+        }
+
+        ctx.restore();
+      }
     }
 
     ctx.restore();

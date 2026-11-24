@@ -12,7 +12,7 @@ export const CAROUSEL_INTERVAL_OPTIONS = [5, 10, 15, 20, 25, 30] as const;
 export type CarouselIntervalSec = (typeof CAROUSEL_INTERVAL_OPTIONS)[number];
 
 // Ambient/backdrop layers that blend cleanly behind any foreground visualizer without clutter
-export const AMBIENT_MIX_POOL = [0, 4, 8, 9, 10, 11, 12, 13, 16, 19, 20, 22, 24, 26];
+export const AMBIENT_MIX_POOL = [0, 4, 8, 9, 10, 11, 12, 13, 16, 19, 20, 22, 24, 26, 28, 29];
 
 export function pickRandomMixLayers(primaryMode: number, count: number): number[] {
   if (count <= 0) return [];
@@ -77,6 +77,8 @@ export const VIZ_MODES: VizModeConfig[] = [
   { id: 25, label: '26. Holographic Tunnel' },
   { id: 26, label: '27. Magnetic Field' },
   { id: 27, label: '28. Supernova Flash' },
+  { id: 28, label: '29. Flowing Spectrum' },
+  { id: 29, label: '30. Magic Hexagon' },
 ];
 
 export const PALETTES: PaletteConfig[] = [

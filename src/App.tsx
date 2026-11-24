@@ -2751,17 +2751,35 @@ export default function App() {
         const localizedStationName = matchedStation
           ? getFmStationLabel(matchedStation, lang)
           : null;
+        const urlId = `url-${hashString(normalizedUrl)}`;
+        const existingSavedEntry = savedUrlsRef.current.find(
+          (u) => u.url === normalizedUrl || u.id === urlId
+        );
+        const hasSavedRadioLabel = Boolean(
+          existingSavedEntry &&
+            /^(?:RadioFM|РадиоФМ|РадіоФМ)(?:\s*:\s*|$)/i.test(existingSavedEntry.label.trim())
+        );
         const tracks = localizedStationName
           ? rawTracks.map((tr) => ({
               ...tr,
               title: localizedStationName,
               sourceName: 'RadioFM',
+              isRadio: true,
             }))
+          : hasSavedRadioLabel
+          ? rawTracks.map((tr) =>
+              tr.mediaType === 'video' || tr.mediaType === 'image'
+                ? tr
+                : {
+                    ...tr,
+                    sourceName: 'RadioFM',
+                    isRadio: true,
+                  }
+            )
           : rawTracks;
         const label = localizedStationName ? `${t.radioFmLabel}: ${localizedStationName}` : rawLabel;
         revokeLocalObjectUrls();
 
-        const urlId = `url-${hashString(normalizedUrl)}`;
         const entry: SavedUrlEntry = {
           id: urlId,
           url: normalizedUrl,
@@ -4008,6 +4026,31 @@ export default function App() {
     }
   };
 
+  const markActiveUrlStreamAsRadio = () => {
+    const idx = currentIndexRef.current;
+    const activeTrackNow = playlistRef.current[idx];
+    if (
+      !activeTrackNow ||
+      activeTrackNow.mediaType === 'video' ||
+      activeTrackNow.mediaType === 'image'
+    ) {
+      return;
+    }
+    const radioTrack: Track = activeTrackNow.isRadio
+      ? activeTrackNow
+      : {
+          ...activeTrackNow,
+          sourceName: activeTrackNow.sourceName || 'RadioFM',
+          isRadio: true,
+        };
+    if (!activeTrackNow.isRadio) {
+      const nextList = playlistRef.current.map((tr, i) => (i === idx ? radioTrack : tr));
+      playlistRef.current = nextList;
+      setPlaylist(nextList);
+    }
+    syncRadioCarouselForTrack(radioTrack);
+  };
+
   const handleAudioDurationChange = (el: HTMLAudioElement) => {
     if (Number.isFinite(el.duration) && el.duration > 0) {
       setDuration(el.duration);
@@ -4015,14 +4058,7 @@ export default function App() {
       el.duration === Infinity &&
       activeSessionRef.current?.sourceType === 'url'
     ) {
-      const activeTrackNow = playlistRef.current[currentIndexRef.current];
-      if (
-        activeTrackNow &&
-        activeTrackNow.mediaType !== 'video' &&
-        activeTrackNow.mediaType !== 'image'
-      ) {
-        syncRadioCarouselForTrack({ ...activeTrackNow, isRadio: true });
-      }
+      markActiveUrlStreamAsRadio();
     }
   };
 
@@ -4033,14 +4069,7 @@ export default function App() {
       el.duration === Infinity &&
       activeSessionRef.current?.sourceType === 'url'
     ) {
-      const activeTrackNow = playlistRef.current[currentIndexRef.current];
-      if (
-        activeTrackNow &&
-        activeTrackNow.mediaType !== 'video' &&
-        activeTrackNow.mediaType !== 'image'
-      ) {
-        syncRadioCarouselForTrack({ ...activeTrackNow, isRadio: true });
-      }
+      markActiveUrlStreamAsRadio();
     }
     const pending = pendingSeekRef.current;
     if (
@@ -4166,7 +4195,12 @@ export default function App() {
             setIsPlaying(true);
             setAwaitingAutoplayUnlock(false);
           })
-          .catch(() => {});
+          .catch((playErr: unknown) => {
+            setIsPlaying(false);
+            if ((playErr as { name?: string } | null)?.name === 'NotAllowedError') {
+              setAwaitingAutoplayUnlock(true);
+            }
+          });
       }
       return;
     }
@@ -4209,8 +4243,11 @@ export default function App() {
             setIsPlaying(true);
             setAwaitingAutoplayUnlock(false);
           })
-          .catch(() => {
+          .catch((playErr: unknown) => {
             setIsPlaying(false);
+            if ((playErr as { name?: string } | null)?.name === 'NotAllowedError') {
+              setAwaitingAutoplayUnlock(true);
+            }
           });
       }
       return;

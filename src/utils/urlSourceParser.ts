@@ -1,4 +1,4 @@
-import { extractShortRadioName } from '../constants/radioStations';
+import { extractShortRadioName, findDefaultFmStationByUrl } from '../constants/radioStations';
 import { DEFAULT_COVER_IMAGE } from '../constants/visualizer';
 import { getTranslations } from '../i18n/translations';
 import { Track } from '../types/audio';
@@ -10,7 +10,8 @@ const NON_STREAM_DOC_EXT_RE =
   /\.(html?|php|asp|aspx|jsp|json|xml|rss|txt|m3u8?|pls)(\?.*)?$/i;
 const RADIO_STREAM_PATH_RE =
   /(?:[-_](?:32|48|56|64|80|96|112|128|160|192|224|256|320)[-_](?:mp3|aac|aacp|ogg|opus|flac|m4a)|(?:mp3|aac|aacp|ogg|opus|flac)[-_](?:32|48|56|64|80|96|112|128|160|192|224|256|320)|\/(?:stream|listen|radio|live|mp3|aac|aacp|ogg|opus|flac)(?:\/\d*)?|\/;[^/?#]*)$/i;
-const RADIO_HOST_RE = /(^|\.)(somafm\.com|musicradio\.com|streamguys\d*\.com|icecast|shoutcast|radiostream)/i;
+const RADIO_HOST_RE =
+  /(^|\.)(somafm\.com|musicradio\.com|streamguys\d*\.com|181fm\.com|hostingradio\.ru|streamtheworld\.com|radiorecord\.ru|zaycev\.fm|rmfstream\.pl|smcdn\.pl|swr\.de|rfm\.fr|unitedradio\.it|bauermedia\.pt|powerapp\.com\.tr|torontocast\.com|vibesounds\.in|zhanafm\.kz|radioca\.st|zeno\.fm|radiojar\.com|radioking\.com|myradio24\.|uber\.radio|icecast|shoutcast|radiostream)/i;
 
 function isLikelyDirectAudioStreamUrl(parsedUrl: URL): boolean {
   if (NON_STREAM_DOC_EXT_RE.test(parsedUrl.pathname)) return false;
@@ -516,7 +517,9 @@ export async function loadTracksFromUrlSource(rawInput: string): Promise<{
   // 4. Direct audio, video, or Icecast/Shoutcast radio stream URL
   if (AUDIO_EXT_RE.test(parsedUrl.pathname) || VIDEO_EXT_RE.test(parsedUrl.pathname)) {
     const isVideo = VIDEO_EXT_RE.test(parsedUrl.pathname);
-    const isRadioFile = !isVideo && RADIO_HOST_RE.test(parsedUrl.hostname);
+    const isRadioFile =
+      !isVideo &&
+      (Boolean(findDefaultFmStationByUrl(normalizedUrl)) || RADIO_HOST_RE.test(parsedUrl.hostname));
     const radioShort = isRadioFile ? extractShortRadioName(normalizedUrl) : '';
     const track: Track = {
       id: `url-file-${normalizedUrl}`,

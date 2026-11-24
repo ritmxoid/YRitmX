@@ -255,16 +255,6 @@ export const NATIONAL_FM_BY_LANG: Record<SupportedLang, DefaultFmStation[]> = {
   ],
   ru: [
     {
-      key: 'nat-ru-zaycev',
-      url: 'https://abs.zaycev.fm/rus256k',
-      labels: {
-        ru: 'Русские хиты (Zaycev)',
-        uk: 'Російські хіти (Zaycev)',
-        kk: 'Орыс хиттері (Zaycev)',
-        en: 'Russian Hits (Zaycev)',
-      },
-    },
-    {
       key: 'nat-ru-record',
       url: 'https://radiorecord.hostingradio.ru/russianhits96.aacp',
       labels: {
@@ -274,17 +264,27 @@ export const NATIONAL_FM_BY_LANG: Record<SupportedLang, DefaultFmStation[]> = {
         en: 'Russian Hits (Record)',
       },
     },
+    {
+      key: 'nat-ru-zaycev',
+      url: 'https://abs.zaycev.fm/rus256k',
+      labels: {
+        ru: 'Русские хиты (Zaycev)',
+        uk: 'Російські хіти (Zaycev)',
+        kk: 'Орыс хиттері (Zaycev)',
+        en: 'Russian Hits (Zaycev)',
+      },
+    },
   ],
   uk: [
-    {
-      key: 'nat-uk-hitfm',
-      url: 'https://online.hitfm.ua/HitFM_HD',
-      labels: { uk: 'Хіт FM (Україна)', ru: 'Хит FM (Украина)', en: 'Hit FM Ukraine' },
-    },
     {
       key: 'nat-uk-kissfm',
       url: 'https://online.kissfm.ua/KissFM_Ukr',
       labels: { uk: 'Kiss FM Україна', ru: 'Kiss FM Украина', en: 'Kiss FM Ukraine' },
+    },
+    {
+      key: 'nat-uk-hitfm',
+      url: 'https://online.hitfm.ua/HitFM_HD',
+      labels: { uk: 'Хіт FM (Україна)', ru: 'Хит FM (Украина)', en: 'Hit FM Ukraine' },
     },
   ],
   de: [
