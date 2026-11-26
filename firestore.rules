@@ -99,6 +99,19 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidTrackStat(data, trackId) {
+      return data.keys().hasAll(['trackId', 'playerPlays', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['trackId', 'playerPlays', 'createdAt', 'updatedAt']) &&
+        data.trackId is string &&
+        data.trackId == trackId &&
+        isValidId(data.trackId) &&
+        data.playerPlays is int &&
+        data.playerPlays >= 1 &&
+        data.playerPlays <= 1000000000 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     match /users/{userId} {
       allow get: if isValidId(userId) && isOwner(userId);
       allow list: if false;
@@ -205,6 +218,24 @@ service cloud.firestore {
           isOwner(userId) &&
           hasUserWorkspace(userId);
       }
+    }
+
+    match /trackStats/{trackId} {
+      allow get: if isValidId(trackId);
+      allow list: if false;
+      allow create: if isValidId(trackId) &&
+        isValidTrackStat(incoming(), trackId) &&
+        incoming().playerPlays == 1 &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(trackId) &&
+        isValidTrackStat(incoming(), trackId) &&
+        incoming().trackId == existing().trackId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['playerPlays', 'updatedAt']) &&
+        incoming().playerPlays == existing().playerPlays + 1;
+      allow delete: if false;
     }
   }
 }

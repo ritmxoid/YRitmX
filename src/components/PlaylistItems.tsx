@@ -1,7 +1,8 @@
-import { Disc3, FolderOpen, Loader2, WifiOff } from 'lucide-react';
+import { Disc3, FolderOpen, Loader2, Play, WifiOff } from 'lucide-react';
 import { DEFAULT_COVER_IMAGE } from '../constants/visualizer';
 import { useI18n } from '../i18n/I18nContext';
 import { Track } from '../types/audio';
+import { formatPlayCount } from '../utils/audiusApi';
 
 interface PlaylistItemsProps {
   tracks: Track[];
@@ -152,6 +153,15 @@ export function PlaylistItems({
                 {isActive && isPlaying ? ` · ${t.playingStatus}` : ''}
               </div>
             </div>
+            {typeof track.playCount === 'number' && (
+              <span
+                title={track.playCount.toLocaleString()}
+                className="shrink-0 inline-flex items-center gap-1 text-[11px] font-mono tabular-nums text-gray-400/80 pl-1"
+              >
+                <Play className="w-2.5 h-2.5 fill-current opacity-70" />
+                <span>{formatPlayCount(track.playCount)}</span>
+              </span>
+            )}
           </button>
         );
       })}

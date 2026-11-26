@@ -19,6 +19,7 @@ import {
   getDocs,
   initializeFirestore,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   where,
@@ -484,5 +485,97 @@ export async function deleteCloudSourceItem(
     await deleteDoc(doc(db, 'users', uid, subcol, docId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function isValidTrackStatId(trackId: string | undefined | null): trackId is string {
+  return Boolean(
+    trackId &&
+      trackId.startsWith('audius-') &&
+      trackId.length <= 128 &&
+      /^[a-zA-Z0-9_\-]+$/.test(trackId)
+  );
+}
+
+function isPermissionDeniedError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return msg.includes('permission-denied') || msg.includes('missing or insufficient permissions');
+}
+
+export async function fetchTrackPlayerPlays(
+  trackIds: string[]
+): Promise<Record<string, number>> {
+  const result: Record<string, number> = {};
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return result;
+  }
+
+  const uniqueIds = Array.from(new Set(trackIds.filter((id) => isValidTrackStatId(id))));
+  if (uniqueIds.length === 0) return result;
+
+  const CHUNK_SIZE = 20;
+  for (let i = 0; i < uniqueIds.length; i += CHUNK_SIZE) {
+    const chunk = uniqueIds.slice(i, i + CHUNK_SIZE);
+    await Promise.all(
+      chunk.map(async (trackId) => {
+        const path = `trackStats/${trackId}`;
+        try {
+          const snap = await getDoc(doc(db, 'trackStats', trackId));
+          if (snap.exists()) {
+            const val = snap.data()?.playerPlays;
+            if (typeof val === 'number' && Number.isFinite(val) && val >= 0) {
+              result[trackId] = Math.floor(val);
+            }
+          }
+        } catch (error) {
+          if (isPermissionDeniedError(error)) {
+            handleFirestoreError(error, OperationType.GET, path);
+          }
+        }
+      })
+    );
+  }
+
+  return result;
+}
+
+export async function incrementTrackPlayerPlay(trackId: string): Promise<number | null> {
+  if (!isValidTrackStatId(trackId)) return null;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return null;
+  }
+
+  const path = `trackStats/${trackId}`;
+  const ref = doc(db, 'trackStats', trackId);
+  try {
+    const nextCount = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) {
+        tx.set(ref, {
+          trackId,
+          playerPlays: 1,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        return 1;
+      }
+      const rawPrev = snap.data()?.playerPlays;
+      const prev =
+        typeof rawPrev === 'number' && Number.isFinite(rawPrev) && rawPrev >= 0
+          ? Math.floor(rawPrev)
+          : 0;
+      const next = prev + 1;
+      tx.update(ref, {
+        playerPlays: next,
+        updatedAt: serverTimestamp(),
+      });
+      return next;
+    });
+    return nextCount;
+  } catch (error) {
+    if (isPermissionDeniedError(error)) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+    return null;
   }
 }

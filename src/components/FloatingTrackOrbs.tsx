@@ -5,6 +5,7 @@ import { DEFAULT_COVER_IMAGE } from '../constants/visualizer';
 import { useI18n } from '../i18n/I18nContext';
 import { Track } from '../types/audio';
 import { trackEvent } from '../utils/analytics';
+import { formatPlayCount } from '../utils/audiusApi';
 import {
   createOrbFxState,
   getShapeClipPath,
@@ -1096,12 +1097,16 @@ export function FloatingTrackOrbs({
               : radioNowPlaying.title
             : spec.track.title;
         const fittedCaption = showCaptions ? fitTextToArcWidth(nowPlayingArcText, maxArcPx) : '';
-        const orbTooltip =
+        const baseOrbTooltip =
           spec.isActive && isRadioTrack && showRadioNowPlaying && radioNowPlaying?.title
             ? radioNowPlaying.artist
               ? `${radioNowPlaying.title} — ${radioNowPlaying.artist}`
               : radioNowPlaying.title
             : `${spec.track.title} — ${spec.track.artist}`;
+        const orbTooltip =
+          typeof spec.track.playCount === 'number'
+            ? `${baseOrbTooltip} · ${formatPlayCount(spec.track.playCount)}`
+            : baseOrbTooltip;
 
         return (
           <button

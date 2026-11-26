@@ -145,6 +145,35 @@
         }
       },
       "required": ["ownerId", "name", "trackCount", "addedAt", "createdAt", "updatedAt"]
+    },
+    "TrackPlayStat": {
+      "title": "TrackPlayStat",
+      "description": "Shared aggregate play counter in the YRitmX player for an Audius track.",
+      "type": "object",
+      "properties": {
+        "trackId": {
+          "type": "string",
+          "description": "Normalized Audius track document identifier (e.g. audius-75g5N).",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "playerPlays": {
+          "type": "integer",
+          "description": "Total active listens (>15s) recorded across all YRitmX player users."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest recorded listen."
+        }
+      },
+      "required": ["trackId", "playerPlays", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -163,6 +192,10 @@
     "/users/{userId}/folderBookmarks/{folderId}": {
       "schema": { "$ref": "#/entities/FolderBookmarkItem" },
       "description": "Lightweight metadata bookmarks of user local folders."
+    },
+    "/trackStats/{trackId}": {
+      "schema": { "$ref": "#/entities/TrackPlayStat" },
+      "description": "Shared per-track play counter incremented by +1 after 15+ seconds of active playback."
     }
   }
 }

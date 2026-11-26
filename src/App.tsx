@@ -88,6 +88,9 @@ import {
   CloudUserInfo,
   deleteCloudSourceItem,
   fetchCloudMediaSources,
+  fetchTrackPlayerPlays,
+  incrementTrackPlayerPlay,
+  isValidTrackStatId,
   registerWithEmailCloud,
   saveCloudMediaSources,
   sendPasswordResetCloud,
@@ -111,6 +114,7 @@ import { LiveOrbSnapshot, StudioFrameState } from './utils/studioFrameRenderer';
 import {
   DEFAULT_AUDIUS_HANDLE,
   fetchAudiusProfileTracks,
+  formatPlayCount,
   getDefaultAudiusHandleForBrowser,
   getDefaultAudiusProfilesForBrowser,
   INTERNATIONAL_AUDIUS_HANDLE,
@@ -471,11 +475,31 @@ export default function App() {
   const prevLangRef = useRef(lang);
   const fmFlyoutSeqRef = useRef(0);
   const fmFlyoutTimerRef = useRef(0);
+  const internalPauseIgnoreUntilRef = useRef(0);
+  const lastResumeAttemptRef = useRef(0);
+  const lastRadioSrcRef = useRef('');
+  const lastRadioMetaWakeRef = useRef(0);
+  const audiusBasePlaysRef = useRef<Map<string, number>>(new Map());
+  const playerPlaysCacheRef = useRef<Map<string, number>>(new Map());
+  const listenTrackerRef = useRef<{
+    trackId: string;
+    passId: number;
+    accumulatedSec: number;
+    lastMediaTime: number;
+    counted: boolean;
+  }>({
+    trackId: '',
+    passId: 0,
+    accumulatedSec: 0,
+    lastMediaTime: 0,
+    counted: false,
+  });
 
   const [fmFlyout, setFmFlyout] = useState<{ id: number; label: string } | null>(null);
   const [radioNowPlaying, setRadioNowPlaying] = useState<{ title: string; artist: string } | null>(
     null
   );
+  const [radioMetaRefreshTick, setRadioMetaRefreshTick] = useState(0);
   const [radioDisplayCycle, setRadioDisplayCycle] = useState<'station' | 'track'>('station');
   const [usingDirectAudioFallback, setUsingDirectAudioFallback] = useState(false);
   const [isStudioMode, setIsStudioMode] = useState(false);
@@ -1208,8 +1232,8 @@ export default function App() {
       }
     }
 
-    if (audioCtxRef.current.state === 'suspended') {
-      void audioCtxRef.current.resume();
+    if (audioCtxRef.current.state !== 'running') {
+      void audioCtxRef.current.resume().catch(() => {});
     }
   }, [eqGains, isMuted, volume]);
 
@@ -1397,13 +1421,17 @@ export default function App() {
   useEffect(() => {
     const rawSrc = currentTrack?.src || '';
     if (!currentTrack?.isRadio || !rawSrc) {
+      lastRadioSrcRef.current = '';
       setRadioNowPlaying(null);
       setRadioDisplayCycle('station');
       return;
     }
 
-    setRadioNowPlaying(null);
-    setRadioDisplayCycle('station');
+    if (lastRadioSrcRef.current !== rawSrc) {
+      lastRadioSrcRef.current = rawSrc;
+      setRadioNowPlaying(null);
+      setRadioDisplayCycle('station');
+    }
 
     if (!isOnline || !isPlaying) {
       return;
@@ -1467,7 +1495,7 @@ export default function App() {
       activeAbort?.abort();
       window.clearInterval(pollId);
     };
-  }, [currentTrack?.isRadio, currentTrack?.src, isOnline, isPlaying]);
+  }, [currentTrack?.isRadio, currentTrack?.src, isOnline, isPlaying, radioMetaRefreshTick]);
 
   // Alternate between Station+Link and Song+Artist every 5 seconds when radio metadata is available
   useEffect(() => {
@@ -1568,11 +1596,11 @@ export default function App() {
         flush();
       }
     };
-    window.addEventListener('visibilitychange', onVisibility);
+    document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pagehide', flush);
     window.addEventListener('beforeunload', flush);
     return () => {
-      window.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', flush);
       window.removeEventListener('beforeunload', flush);
     };
@@ -1888,6 +1916,7 @@ export default function App() {
       const videoEl = videoRef.current;
       if (!track) return;
 
+      internalPauseIgnoreUntilRef.current = performance.now() + 250;
       usingDirectAudioFallbackRef.current = false;
       setUsingDirectAudioFallback(false);
       proxyAttemptedKeyRef.current = '';
@@ -2043,6 +2072,129 @@ export default function App() {
     [ensureAudioGraph, getActiveMediaElement]
   );
 
+  const recoverPlaybackFromBackground = useCallback(
+    async (forceFromGesture = false): Promise<boolean> => {
+      const now = performance.now();
+      if (!forceFromGesture && now - lastResumeAttemptRef.current < 350) {
+        return false;
+      }
+      lastResumeAttemptRef.current = now;
+
+      if (!forceFromGesture && !playbackIntentRef.current) {
+        return false;
+      }
+
+      if (
+        !usingDirectAudioFallbackRef.current &&
+        audioCtxRef.current &&
+        audioCtxRef.current.state !== 'running'
+      ) {
+        try {
+          await audioCtxRef.current.resume();
+        } catch {
+          // ignore until user gesture
+        }
+      }
+
+      if (!forceFromGesture && isRecordingRef.current) {
+        return false;
+      }
+
+      const activeTrack = playlistRef.current[currentIndexRef.current] ?? null;
+      if (!activeTrack) return false;
+
+      if (activeTrack.mediaType === 'image') {
+        if (forceFromGesture) ensureAudioGraph();
+        setIsPlaying(true);
+        setAwaitingAutoplayUnlock(false);
+        return true;
+      }
+
+      const mediaEl = getActiveMediaElement(activeTrack);
+      if (!mediaEl) return false;
+
+      if (forceFromGesture && !usingDirectAudioFallbackRef.current) {
+        ensureAudioGraph();
+        if (audioCtxRef.current && audioCtxRef.current.state !== 'running') {
+          try {
+            await audioCtxRef.current.resume();
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      const alreadyHealthy =
+        !mediaEl.paused &&
+        !mediaEl.error &&
+        mediaEl.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+
+      if (alreadyHealthy) {
+        setIsPlaying(true);
+        setAwaitingAutoplayUnlock(false);
+        if (activeTrack.isRadio && now - lastRadioMetaWakeRef.current > 8000) {
+          lastRadioMetaWakeRef.current = now;
+          setRadioMetaRefreshTick((n) => n + 1);
+        }
+        return true;
+      }
+
+      if (!mediaEl.getAttribute('src') && activeTrack.src) {
+        mediaEl.src = activeTrack.src;
+      }
+
+      const needsReload =
+        Boolean(activeTrack.isRadio) ||
+        Boolean(mediaEl.error) ||
+        mediaEl.readyState === HTMLMediaElement.HAVE_NOTHING ||
+        mediaEl.networkState === HTMLMediaElement.NETWORK_NO_SOURCE;
+
+      if (needsReload) {
+        const resumePos =
+          !activeTrack.isRadio &&
+          Number.isFinite(mediaEl.currentTime) &&
+          mediaEl.currentTime > 0.5
+            ? mediaEl.currentTime
+            : 0;
+        if (resumePos > 0) {
+          pendingSeekRef.current = {
+            src: mediaEl.src || mediaEl.currentSrc || activeTrack.src,
+            time: resumePos,
+          };
+        }
+        internalPauseIgnoreUntilRef.current = performance.now() + 250;
+        mediaEl.load();
+      }
+
+      try {
+        await mediaEl.play();
+        setIsPlaying(true);
+        setAwaitingAutoplayUnlock(false);
+        if (activeTrack.isRadio) {
+          lastRadioMetaWakeRef.current = now;
+          setRadioMetaRefreshTick((n) => n + 1);
+        }
+        return true;
+      } catch (err) {
+        const targetKey = `${activeTrack.id}|${activeTrack.src}`;
+        const recoveryInFlight =
+          usingDirectAudioFallbackRef.current ||
+          proxyAttemptedKeyRef.current === targetKey ||
+          httpsUpgradeAttemptedKeyRef.current === targetKey;
+        if (recoveryInFlight) {
+          return true;
+        }
+        const errName = (err as { name?: string } | null)?.name;
+        setIsPlaying(false);
+        if (errName === 'NotAllowedError') {
+          setAwaitingAutoplayUnlock(true);
+        }
+        return false;
+      }
+    },
+    [ensureAudioGraph, getActiveMediaElement]
+  );
+
   // Unlock AudioContext & start playback on first user gesture if autoplay was blocked
   useEffect(() => {
     if (!awaitingAutoplayUnlock) return;
@@ -2093,6 +2245,88 @@ export default function App() {
     };
   }, [analyser, ensureAudioGraph, isPlaying]);
 
+  const resetListenTracker = useCallback((trackId: string | undefined, startTime = 0) => {
+    const prevPassId = listenTrackerRef.current.passId;
+    listenTrackerRef.current = {
+      trackId: trackId ?? '',
+      passId: prevPassId + 1,
+      accumulatedSec: 0,
+      lastMediaTime: Math.max(0, startTime),
+      counted: false,
+    };
+  }, []);
+
+  const applyPlayerPlaysToPlaylist = useCallback(() => {
+    setPlaylist((prev) => {
+      let changed = false;
+      const next = prev.map((tr) => {
+        if (!isValidTrackStatId(tr.id)) return tr;
+        const base = audiusBasePlaysRef.current.get(tr.id);
+        const extra = playerPlaysCacheRef.current.get(tr.id) ?? 0;
+        if (typeof base !== 'number' && extra <= 0) return tr;
+        const total = (base ?? 0) + extra;
+        if (tr.playCount === total) return tr;
+        changed = true;
+        return { ...tr, playCount: total };
+      });
+      if (changed) {
+        playlistRef.current = next;
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
+  const syncPlayerPlaysForTracks = useCallback(
+    async (tracks: Track[]) => {
+      const ids = tracks.map((tr) => tr.id).filter((id) => isValidTrackStatId(id));
+      if (ids.length === 0) return;
+      try {
+        const fetched = await fetchTrackPlayerPlays(ids);
+        for (const [id, count] of Object.entries(fetched)) {
+          const prevCached = playerPlaysCacheRef.current.get(id) ?? 0;
+          if (count > prevCached) {
+            playerPlaysCacheRef.current.set(id, count);
+          }
+        }
+        applyPlayerPlaysToPlaylist();
+      } catch {
+        // Ignore non-fatal stats sync errors
+      }
+    },
+    [applyPlayerPlaysToPlaylist]
+  );
+
+  const recordAudiusTrackListen = useCallback(
+    async (trackId: string) => {
+      if (!isValidTrackStatId(trackId)) return;
+      const prevCached = playerPlaysCacheRef.current.get(trackId) ?? 0;
+      const optimistic = prevCached + 1;
+      playerPlaysCacheRef.current.set(trackId, optimistic);
+      applyPlayerPlaysToPlaylist();
+
+      try {
+        const confirmed = await incrementTrackPlayerPlay(trackId);
+        if (typeof confirmed === 'number') {
+          const currentBest = playerPlaysCacheRef.current.get(trackId) ?? 0;
+          playerPlaysCacheRef.current.set(
+            trackId,
+            Math.max(confirmed, currentBest === optimistic ? confirmed : currentBest)
+          );
+          applyPlayerPlaysToPlaylist();
+        } else if ((playerPlaysCacheRef.current.get(trackId) ?? 0) === optimistic) {
+          playerPlaysCacheRef.current.set(trackId, prevCached);
+          applyPlayerPlaysToPlaylist();
+        }
+      } catch {
+        if ((playerPlaysCacheRef.current.get(trackId) ?? 0) === optimistic) {
+          playerPlaysCacheRef.current.set(trackId, prevCached);
+          applyPlayerPlaysToPlaylist();
+        }
+      }
+    },
+    [applyPlayerPlaysToPlaylist]
+  );
+
   const loadAudiusTracks = useCallback(
     async (
       handle: string,
@@ -2111,9 +2345,22 @@ export default function App() {
         revokeLocalObjectUrls();
 
         const shouldShuffleOnLaunch = Boolean(options?.isInitial);
-        const tracks = shouldShuffleOnLaunch
+        const orderedTracks = shouldShuffleOnLaunch
           ? shuffleTracksArray(fetchedTracks)
           : fetchedTracks;
+
+        orderedTracks.forEach((tr) => {
+          if (isValidTrackStatId(tr.id) && typeof tr.playCount === 'number') {
+            audiusBasePlaysRef.current.set(tr.id, tr.playCount);
+          }
+        });
+
+        const tracks = orderedTracks.map((tr) => {
+          if (!isValidTrackStatId(tr.id)) return tr;
+          const extra = playerPlaysCacheRef.current.get(tr.id) ?? 0;
+          if (extra <= 0) return tr;
+          return { ...tr, playCount: (tr.playCount ?? 0) + extra };
+        });
 
         const { index, seekTime } = shouldShuffleOnLaunch
           ? { index: 0, seekTime: 0 }
@@ -2129,6 +2376,8 @@ export default function App() {
         setDuration(targetTrack?.durationHint ?? 0);
         setActiveFolderId(null);
         setActiveUrlId(null);
+        resetListenTracker(targetTrack?.id, seekTime);
+        void syncPlayerPlaysForTracks(tracks);
 
         activeSessionRef.current = {
           sourceType: 'audius',
@@ -2249,10 +2498,12 @@ export default function App() {
       lang,
       persistCurrentSession,
       randomizeVisual,
+      resetListenTracker,
       revokeLocalObjectUrls,
       saveProfileToHistory,
       showToast,
       startPlaybackSafe,
+      syncPlayerPlaysForTracks,
       t,
     ]
   );
@@ -3378,6 +3629,7 @@ export default function App() {
       const sameSingleTrackLoop =
         playlist.length === 1 && index === currentIndexRef.current && isStudioModeRef.current;
       pendingSeekRef.current = null;
+      resetListenTracker(track.id, 0);
       currentIndexRef.current = index;
       setCurrentIndex(index);
       setCurrentTime(0);
@@ -3423,6 +3675,7 @@ export default function App() {
       persistCurrentSession,
       playlist,
       randomizeVisual,
+      resetListenTracker,
       showToast,
       startPlaybackSafe,
       studioT,
@@ -3495,6 +3748,7 @@ export default function App() {
       setCurrentTime(0);
       setDuration(IMAGE_SLIDE_DURATION_SEC);
     } else if (mediaEl) {
+      internalPauseIgnoreUntilRef.current = performance.now() + 250;
       mediaEl.pause();
       if (!mediaEl.src && activeTrack) {
         mediaEl.src = activeTrack.src;
@@ -3854,7 +4108,16 @@ export default function App() {
       ensureAudioGraph();
     }
 
-    if (isPlaying) {
+    const ctxBlocked =
+      !usingDirectAudioFallbackRef.current &&
+      audioCtxRef.current != null &&
+      audioCtxRef.current.state !== 'running';
+    const mediaActuallyPausedOrBroken =
+      mediaEl.paused ||
+      Boolean(mediaEl.error) ||
+      mediaEl.networkState === HTMLMediaElement.NETWORK_NO_SOURCE;
+
+    if (isPlaying && !mediaActuallyPausedOrBroken && !ctxBlocked) {
       playbackIntentRef.current = false;
       mediaEl.pause();
       setIsPlaying(false);
@@ -3871,7 +4134,7 @@ export default function App() {
       if (!mediaEl.src && currentTrack) {
         mediaEl.src = currentTrack.src;
       }
-      const started = await startPlaybackSafe(true, currentTrack);
+      const started = await recoverPlaybackFromBackground(true);
       if (started) {
         persistCurrentSession({
           currentTime: mediaEl.currentTime,
@@ -3893,8 +4156,8 @@ export default function App() {
     isPlaying,
     persistCurrentSession,
     playlist.length,
+    recoverPlaybackFromBackground,
     showToast,
-    startPlaybackSafe,
     t,
   ]);
 
@@ -3916,6 +4179,112 @@ export default function App() {
     const prevIdx = (currentIndex - 1 + playlist.length) % playlist.length;
     void selectTrack(prevIdx, isPlaying);
   }, [currentIndex, isPlaying, playlist.length, selectTrack]);
+
+  // Recover AudioContext & stalled/suspended playback when mobile app returns from background/sleep
+  useEffect(() => {
+    const handleWake = () => {
+      if (document.visibilityState === 'hidden') return;
+      void recoverPlaybackFromBackground(false);
+    };
+    document.addEventListener('visibilitychange', handleWake);
+    window.addEventListener('pageshow', handleWake);
+    window.addEventListener('focus', handleWake);
+    window.addEventListener('online', handleWake);
+    return () => {
+      document.removeEventListener('visibilitychange', handleWake);
+      window.removeEventListener('pageshow', handleWake);
+      window.removeEventListener('focus', handleWake);
+      window.removeEventListener('online', handleWake);
+    };
+  }, [recoverPlaybackFromBackground]);
+
+  // Sync MediaSession metadata, playbackState, and lockscreen/headset hardware controls
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+    if (!currentTrack) {
+      try {
+        ms.metadata = null;
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    try {
+      const artworkSrc = currentTrack.cover || DEFAULT_COVER_IMAGE;
+      const resolvedArtworkSrc = artworkSrc.startsWith('/')
+        ? `${window.location.origin}${artworkSrc}`
+        : artworkSrc;
+      ms.metadata = new MediaMetadata({
+        title: coverDisplayTitle || currentTrack.title,
+        artist: coverDisplayArtist || currentTrack.artist,
+        album: currentTrack.isRadio ? t.radioFmLabel : currentTrack.sourceName,
+        artwork: resolvedArtworkSrc ? [{ src: resolvedArtworkSrc }] : [],
+      });
+    } catch {
+      // ignore if MediaMetadata is unavailable
+    }
+  }, [coverDisplayArtist, coverDisplayTitle, currentTrack, t.radioFmLabel]);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    try {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    } catch {
+      // ignore
+    }
+  }, [isPlaying]);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+    const setHandler = (
+      action: MediaSessionAction,
+      handler: MediaSessionActionHandler | null
+    ) => {
+      try {
+        ms.setActionHandler(action, handler);
+      } catch {
+        // ignore unsupported MediaSession actions
+      }
+    };
+
+    setHandler('play', () => {
+      playbackIntentRef.current = true;
+      void recoverPlaybackFromBackground(true);
+    });
+    setHandler('pause', () => {
+      playbackIntentRef.current = false;
+      const mediaEl = getActiveMediaElement();
+      if (mediaEl && !mediaEl.paused) {
+        mediaEl.pause();
+      }
+      setIsPlaying(false);
+      persistCurrentSession({
+        currentTime: mediaEl?.currentTime ?? 0,
+        wasPlaying: false,
+      });
+    });
+    setHandler('previoustrack', () => {
+      prevTrack();
+    });
+    setHandler('nexttrack', () => {
+      nextTrack(true);
+    });
+
+    return () => {
+      setHandler('play', null);
+      setHandler('pause', null);
+      setHandler('previoustrack', null);
+      setHandler('nexttrack', null);
+    };
+  }, [
+    getActiveMediaElement,
+    nextTrack,
+    persistCurrentSession,
+    prevTrack,
+    recoverPlaybackFromBackground,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -4019,6 +4388,31 @@ export default function App() {
     if (Number.isFinite(el.duration) && el.duration > 0) {
       setDuration(el.duration);
     }
+    const activeTrackNow = playlistRef.current[currentIndexRef.current];
+    if (
+      activeTrackNow &&
+      isValidTrackStatId(activeTrackNow.id) &&
+      el === getActiveMediaElement(activeTrackNow) &&
+      !el.paused &&
+      !el.ended
+    ) {
+      const tracker = listenTrackerRef.current;
+      if (tracker.trackId !== activeTrackNow.id) {
+        resetListenTracker(activeTrackNow.id, el.currentTime);
+      } else {
+        const delta = el.currentTime - tracker.lastMediaTime;
+        if (delta > 0 && delta <= 2.5) {
+          tracker.accumulatedSec += delta;
+        } else if (tracker.counted && delta < -3 && el.currentTime < 5) {
+          resetListenTracker(activeTrackNow.id, el.currentTime);
+        }
+        listenTrackerRef.current.lastMediaTime = el.currentTime;
+        if (!listenTrackerRef.current.counted && listenTrackerRef.current.accumulatedSec > 15) {
+          listenTrackerRef.current.counted = true;
+          void recordAudiusTrackListen(activeTrackNow.id);
+        }
+      }
+    }
     const now = Date.now();
     if (now - lastTimeFlushRef.current >= 2000) {
       lastTimeFlushRef.current = now;
@@ -4091,13 +4485,23 @@ export default function App() {
     }
   };
 
-  const handleAudioPause = (el: HTMLAudioElement) => {
+  const handleAudioPause = (el: HTMLMediaElement) => {
+    if (el !== getActiveMediaElement()) return;
     if (isRecordingRef.current && isPlayingRef.current && !el.ended) {
       window.setTimeout(() => {
         if (isRecordingRef.current && isPlayingRef.current && el.paused && !el.ended) {
           void el.play().catch(() => {});
         }
       }, 60);
+      return;
+    }
+    if (
+      performance.now() > internalPauseIgnoreUntilRef.current &&
+      !el.ended &&
+      el.paused &&
+      isPlayingRef.current
+    ) {
+      setIsPlaying(false);
     }
   };
 
@@ -4122,6 +4526,7 @@ export default function App() {
     });
     if (isRecordingRef.current) {
       if (isRepeat) {
+        resetListenTracker(playlistRef.current[currentIndexRef.current]?.id, 0);
         el.currentTime = 0;
         void el.play().catch(() => {});
         return;
@@ -4141,6 +4546,7 @@ export default function App() {
       return;
     }
     if (isRepeat) {
+      resetListenTracker(playlistRef.current[currentIndexRef.current]?.id, 0);
       el.currentTime = 0;
       void el.play().catch(() => {});
     } else {
@@ -4223,6 +4629,7 @@ export default function App() {
           ? activeTrack.src.replace(/^http:\/\//i, 'https://')
           : activeTrack.src;
 
+      internalPauseIgnoreUntilRef.current = performance.now() + 250;
       el.pause();
       if (el.hasAttribute('src')) {
         el.removeAttribute('src');
@@ -5693,8 +6100,21 @@ export default function App() {
       customStageMedia.backdropOverlay === 'clean'
     );
 
+  const canSwipeStageBackground =
+    !isStudioMode &&
+    !isRecordArmed &&
+    !isRecording &&
+    !isClassicVideoPlayer &&
+    !isImageTrack &&
+    !(
+      !cameraOverlayActive &&
+      customStageMedia?.displayMode === 'backdrop' &&
+      customStageMedia.backdropOverlay === 'clean'
+    ) &&
+    (isFloatingOrbsActive || uiVisible);
+
   const handleStagePointerDown = (e: ReactPointerEvent<HTMLElement>) => {
-    if (!isFloatingOrbsActive) return;
+    if (!canSwipeStageBackground) return;
     if (
       isSourcesOpen ||
       isEqOpen ||
@@ -5726,15 +6146,22 @@ export default function App() {
     };
   };
 
+  const didStageSwipeExceedThreshold = (dx: number, dy: number) => {
+    const dist = Math.hypot(dx, dy);
+    if (isFloatingOrbsActive) return dist >= 36;
+    return (Math.abs(dx) >= 30 && Math.abs(dx) > Math.abs(dy) * 0.9) || dist >= 44;
+  };
+
   const handleStagePointerMove = (e: ReactPointerEvent<HTMLElement>) => {
     const start = stageSwipeStartRef.current;
     if (!start || start.pointerId !== e.pointerId || start.triggered) return;
-    const dist = Math.hypot(e.clientX - start.x, e.clientY - start.y);
-    if (dist >= 36) {
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (didStageSwipeExceedThreshold(dx, dy)) {
       start.triggered = true;
       stageSwipeHandledRef.current = true;
       randomizeVisual();
-      trackEvent('orbs_bg_swipe_theme');
+      trackEvent(isFloatingOrbsActive ? 'orbs_bg_swipe_theme' : 'cover_bg_swipe_theme');
       if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
         try {
           navigator.vibrate(10);
@@ -5748,11 +6175,12 @@ export default function App() {
   const handleStagePointerUp = (e: ReactPointerEvent<HTMLElement>) => {
     const start = stageSwipeStartRef.current;
     if (start && start.pointerId === e.pointerId && !start.triggered) {
-      const dist = Math.hypot(e.clientX - start.x, e.clientY - start.y);
-      if (dist >= 36) {
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      if (didStageSwipeExceedThreshold(dx, dy)) {
         stageSwipeHandledRef.current = true;
         randomizeVisual();
-        trackEvent('orbs_bg_swipe_theme');
+        trackEvent(isFloatingOrbsActive ? 'orbs_bg_swipe_theme' : 'cover_bg_swipe_theme');
       }
     }
     if (stageSwipeHandledRef.current) {
@@ -6043,7 +6471,11 @@ export default function App() {
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleStageDrop}
       className={`min-h-[100dvh] bg-[#0a0a0c] text-gray-100 flex flex-col justify-between relative overflow-x-hidden ${
-        isFloatingOrbsActive ? 'touch-none' : ''
+        isFloatingOrbsActive
+          ? 'touch-none'
+          : canSwipeStageBackground
+          ? 'touch-pan-y'
+          : ''
       }`}
     >
       {/* UNIFIED FULL-SCREEN REACTIVE CANVAS + STUDIO FRAME + MP4 CAPTURE */}
@@ -6326,6 +6758,7 @@ export default function App() {
             }
           }
         }}
+        onPause={(e) => handleAudioPause(e.currentTarget)}
         onEnded={() => {
           if (isRecordingRef.current) {
             const hasNextSlide =
@@ -6785,6 +7218,16 @@ export default function App() {
               className="w-full h-full object-cover select-none"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent" />
+
+            {typeof currentTrack?.playCount === 'number' && (
+              <div
+                title={currentTrack.playCount.toLocaleString()}
+                className="absolute top-3 left-3 px-2 py-0.5 rounded-full bg-black/50 backdrop-blur-md border border-white/10 text-[11px] font-mono tabular-nums text-gray-200/90 flex items-center gap-1 pointer-events-none"
+              >
+                <Play className="w-2.5 h-2.5 fill-current text-purple-300/90" />
+                <span>{formatPlayCount(currentTrack.playCount)}</span>
+              </div>
+            )}
 
             <div className="absolute top-3 right-3 px-2.5 py-1 rounded-lg bg-black/55 backdrop-blur-md text-[11px] font-medium text-gray-200 opacity-0 group-hover:opacity-100 transition-opacity">
               {t.changeSourceBadge}

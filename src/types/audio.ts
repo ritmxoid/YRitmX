@@ -43,6 +43,7 @@ export interface Track {
   durationHint?: number;
   isObjectUrl?: boolean;
   isRadio?: boolean;
+  playCount?: number;
 }
 
 export interface ToastMessage {

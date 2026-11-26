@@ -12,6 +12,7 @@ interface AudiusTrack {
   id: string;
   title: string;
   duration?: number;
+  play_count?: number;
   is_delete?: boolean;
   is_available?: boolean;
   is_streamable?: boolean;
@@ -35,6 +36,21 @@ interface AudiusRepostEntry {
 
 export const DEFAULT_AUDIUS_HANDLE = 'RitmXoid';
 export const INTERNATIONAL_AUDIUS_HANDLE = 'estelladawnmusic';
+
+export function formatPlayCount(count: number): string {
+  const safe = Math.max(0, Math.floor(count));
+  if (safe < 1000) return String(safe);
+  if (safe < 999500) {
+    const k = safe / 1000;
+    return k < 10 ? `${Number(k.toFixed(1))}K` : `${Math.round(k)}K`;
+  }
+  if (safe < 999500000) {
+    const m = safe / 1000000;
+    return m < 10 ? `${Number(m.toFixed(1))}M` : `${Math.round(m)}M`;
+  }
+  const b = safe / 1000000000;
+  return `${Number(b.toFixed(1))}B`;
+}
 
 const RITMXOID_DEFAULT_LANG_CODES = new Set([
   'ru', // Russian
@@ -257,6 +273,12 @@ export async function fetchAudiusProfileTracks(handle: string): Promise<{
         src: `${host}/v1/tracks/${tr.id}/stream`,
         sourceName: `Audius: @${selectedUser.handle}`,
         durationHint: tr.duration,
+        playCount:
+          typeof tr.play_count === 'number' &&
+          Number.isFinite(tr.play_count) &&
+          tr.play_count >= 0
+            ? Math.floor(tr.play_count)
+            : undefined,
       }));
 
       return { tracks, resolvedHandle: selectedUser.handle };
