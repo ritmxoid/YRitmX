@@ -13,6 +13,8 @@ interface AudiusTrack {
   title: string;
   duration?: number;
   play_count?: number;
+  release_date?: string;
+  created_at?: string;
   is_delete?: boolean;
   is_available?: boolean;
   is_streamable?: boolean;
@@ -261,25 +263,30 @@ export async function fetchAudiusProfileTracks(handle: string): Promise<{
         throw new Error(t.errAudiusNoTracks(selectedUser.handle));
       }
 
-      const tracks: Track[] = rawTracks.map((tr) => ({
-        id: `audius-${tr.id}`,
-        title: tr.title,
-        artist: tr.user?.name || tr.user?.handle || selectedUser.name || selectedUser.handle,
-        cover:
-          tr.artwork?.['480x480'] ||
-          tr.artwork?.['150x150'] ||
-          tr.artwork?.['1000x1000'] ||
-          DEFAULT_COVER_IMAGE,
-        src: `${host}/v1/tracks/${tr.id}/stream`,
-        sourceName: `Audius: @${selectedUser.handle}`,
-        durationHint: tr.duration,
-        playCount:
-          typeof tr.play_count === 'number' &&
-          Number.isFinite(tr.play_count) &&
-          tr.play_count >= 0
-            ? Math.floor(tr.play_count)
-            : undefined,
-      }));
+      const tracks: Track[] = rawTracks.map((tr) => {
+        const rawDate = tr.release_date || tr.created_at;
+        const parsedDate = rawDate ? Date.parse(rawDate) : NaN;
+        return {
+          id: `audius-${tr.id}`,
+          title: tr.title,
+          artist: tr.user?.name || tr.user?.handle || selectedUser.name || selectedUser.handle,
+          cover:
+            tr.artwork?.['480x480'] ||
+            tr.artwork?.['150x150'] ||
+            tr.artwork?.['1000x1000'] ||
+            DEFAULT_COVER_IMAGE,
+          src: `${host}/v1/tracks/${tr.id}/stream`,
+          sourceName: `Audius: @${selectedUser.handle}`,
+          durationHint: tr.duration,
+          playCount:
+            typeof tr.play_count === 'number' &&
+            Number.isFinite(tr.play_count) &&
+            tr.play_count >= 0
+              ? Math.floor(tr.play_count)
+              : undefined,
+          publishedAt: Number.isFinite(parsedDate) ? parsedDate : undefined,
+        };
+      });
 
       return { tracks, resolvedHandle: selectedUser.handle };
     } catch (err) {

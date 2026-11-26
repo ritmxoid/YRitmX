@@ -30,8 +30,9 @@ import { useI18n } from '../i18n/I18nContext';
 import { getHelpMessages } from '../i18n/helpMessages';
 import { getStudioMessages } from '../i18n/studioMessages';
 import { SUPPORTED_LANGUAGES } from '../i18n/translations';
-import { SourceTab, Track } from '../types/audio';
+import { PlaylistSortField, PlaylistSortMode, SourceTab, Track } from '../types/audio';
 import { PlaylistItems } from './PlaylistItems';
+import { PlaylistSortControls } from './PlaylistSortControls';
 
 interface MobileMenuModalProps {
   isOpen: boolean;
@@ -674,6 +675,10 @@ interface MobilePlaylistModalProps {
   isLoading: boolean;
   isOffline?: boolean;
   errorMessage: string | null;
+  canSort?: boolean;
+  showDateAndPopularSort?: boolean;
+  sortMode?: PlaylistSortMode | null;
+  onToggleSort?: (field: PlaylistSortField) => void;
   onSelectTrack: (idx: number) => void;
   onTriggerDemo: () => void;
   onOpenFolderSource?: () => void;
@@ -691,6 +696,10 @@ export function MobilePlaylistModal({
   isLoading,
   isOffline = false,
   errorMessage,
+  canSort = false,
+  showDateAndPopularSort = true,
+  sortMode = null,
+  onToggleSort,
   onSelectTrack,
   onTriggerDemo,
   onOpenFolderSource,
@@ -728,14 +737,21 @@ export function MobilePlaylistModal({
           </button>
         </div>
 
-        <div className="mb-3">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder={t.searchPlaceholder}
-            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-gray-500 focus:outline-none focus:border-purple-500"
+            className="flex-1 min-w-[120px] bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-gray-500 focus:outline-none focus:border-purple-500"
           />
+          {canSort && onToggleSort && (
+            <PlaylistSortControls
+              sortMode={sortMode}
+              onToggleSort={onToggleSort}
+              showDateAndPopular={showDateAndPopularSort}
+            />
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-2 pr-1 hide-scrollbar">

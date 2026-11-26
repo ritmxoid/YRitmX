@@ -44,7 +44,11 @@ export interface Track {
   isObjectUrl?: boolean;
   isRadio?: boolean;
   playCount?: number;
+  publishedAt?: number;
 }
+
+export type PlaylistSortField = 'date' | 'popular' | 'random';
+export type PlaylistSortMode = 'date-desc' | 'date-asc' | 'popular-desc' | 'popular-asc' | 'random';
 
 export interface ToastMessage {
   id: number;

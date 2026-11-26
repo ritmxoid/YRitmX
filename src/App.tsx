@@ -41,6 +41,7 @@ import {
   PWAInstallGuideModal,
 } from './components/MobileModals';
 import { PlaylistItems } from './components/PlaylistItems';
+import { PlaylistSortControls } from './components/PlaylistSortControls';
 import { SourcesModal } from './components/SourcesModal';
 import { StageMediaModal } from './components/StageMediaModal';
 import { StudioRecordBar } from './components/StudioRecordBar';
@@ -66,6 +67,8 @@ import {
   FrameMotionMode,
   FrameRotationTarget,
   MediaKind,
+  PlaylistSortField,
+  PlaylistSortMode,
   RecordAspectRatio,
   RecordQualityPreset,
   RecordRenderMode,
@@ -172,6 +175,33 @@ function shuffleTracksArray<T>(items: T[]): T[] {
     const j = Math.floor(Math.random() * (i + 1));
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
+  return copy;
+}
+
+function sortTracksByMode(items: Track[], mode: PlaylistSortMode): Track[] {
+  if (mode === 'random') {
+    return shuffleTracksArray(items);
+  }
+  const copy = [...items];
+  copy.sort((a, b) => {
+    if (mode === 'date-desc' || mode === 'date-asc') {
+      const aDate = a.publishedAt ?? 0;
+      const bDate = b.publishedAt ?? 0;
+      if (aDate !== bDate) {
+        return mode === 'date-desc' ? bDate - aDate : aDate - bDate;
+      }
+      const aPop = a.playCount ?? 0;
+      const bPop = b.playCount ?? 0;
+      return bPop - aPop;
+    }
+
+    const aPop = a.playCount ?? 0;
+    const bPop = b.playCount ?? 0;
+    if (aPop !== bPop) {
+      return mode === 'popular-desc' ? bPop - aPop : aPop - bPop;
+    }
+    return (b.publishedAt ?? 0) - (a.publishedAt ?? 0);
+  });
   return copy;
 }
 
@@ -525,6 +555,8 @@ export default function App() {
 
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const [playlist, setPlaylist] = useState<Track[]>([]);
+  const [playlistSortMode, setPlaylistSortMode] = useState<PlaylistSortMode | null>(null);
+  const playlistSortModeRef = useRef<PlaylistSortMode | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [awaitingAutoplayUnlock, setAwaitingAutoplayUnlock] = useState(false);
@@ -1520,6 +1552,12 @@ export default function App() {
     ? radioNowPlaying!.artist || currentTrack?.artist || t.radioFmLabel
     : currentTrack?.artist;
 
+  const hasSortableStats = useMemo(
+    () => playlist.some((tr) => typeof tr.playCount === 'number'),
+    [playlist]
+  );
+  const canSortPlaylist = playlist.length > 1;
+
   const filteredPlaylist = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return playlist;
@@ -1584,6 +1622,54 @@ export default function App() {
       });
     },
     []
+  );
+
+  const handleTogglePlaylistSort = useCallback(
+    (field: PlaylistSortField) => {
+      const nextMode: PlaylistSortMode =
+        field === 'random'
+          ? 'random'
+          : field === 'date'
+            ? playlistSortModeRef.current === 'date-desc'
+              ? 'date-asc'
+              : 'date-desc'
+            : playlistSortModeRef.current === 'popular-desc'
+              ? 'popular-asc'
+              : 'popular-desc';
+
+      playlistSortModeRef.current = nextMode;
+      setPlaylistSortMode(nextMode);
+
+      const currentList = playlistRef.current;
+      if (currentList.length === 0) return;
+
+      const activeTrack = currentList[currentIndexRef.current];
+      let sortedList = sortTracksByMode(currentList, nextMode);
+      if (
+        nextMode === 'random' &&
+        currentList.length >= 2 &&
+        sortedList.every((tr, idx) => tr.id === currentList[idx]?.id)
+      ) {
+        sortedList = [...sortedList.slice(1), sortedList[0]];
+      }
+      const nextActiveIdx = activeTrack
+        ? sortedList.findIndex((tr) => tr.id === activeTrack.id)
+        : -1;
+      const resolvedIndex = nextActiveIdx !== -1 ? nextActiveIdx : 0;
+
+      playlistRef.current = sortedList;
+      currentIndexRef.current = resolvedIndex;
+      setPlaylist(sortedList);
+      setCurrentIndex(resolvedIndex);
+
+      persistCurrentSession({
+        trackId: sortedList[resolvedIndex]?.id,
+        trackTitle: sortedList[resolvedIndex]?.title,
+        trackArtist: sortedList[resolvedIndex]?.artist,
+        trackIndex: resolvedIndex,
+      });
+    },
+    [persistCurrentSession]
   );
 
   // Flush final playback position & playing state when app hides or closes
@@ -2345,6 +2431,11 @@ export default function App() {
         revokeLocalObjectUrls();
 
         const shouldShuffleOnLaunch = Boolean(options?.isInitial);
+        if (shouldShuffleOnLaunch) {
+          playlistSortModeRef.current = null;
+          setPlaylistSortMode(null);
+        }
+
         const orderedTracks = shouldShuffleOnLaunch
           ? shuffleTracksArray(fetchedTracks)
           : fetchedTracks;
@@ -2355,12 +2446,17 @@ export default function App() {
           }
         });
 
-        const tracks = orderedTracks.map((tr) => {
+        const mergedTracks = orderedTracks.map((tr) => {
           if (!isValidTrackStatId(tr.id)) return tr;
           const extra = playerPlaysCacheRef.current.get(tr.id) ?? 0;
           if (extra <= 0) return tr;
           return { ...tr, playCount: (tr.playCount ?? 0) + extra };
         });
+
+        const activeSortMode = !shouldShuffleOnLaunch ? playlistSortModeRef.current : null;
+        const tracks = activeSortMode
+          ? sortTracksByMode(mergedTracks, activeSortMode)
+          : mergedTracks;
 
         const { index, seekTime } = shouldShuffleOnLaunch
           ? { index: 0, seekTime: 0 }
@@ -2459,6 +2555,8 @@ export default function App() {
             isRadio: true,
           };
           revokeLocalObjectUrls();
+          playlistSortModeRef.current = null;
+          setPlaylistSortMode(null);
           playlistRef.current = [radioTrack];
           currentIndexRef.current = 0;
           initialRestoreConsumedRef.current = true;
@@ -2528,6 +2626,8 @@ export default function App() {
         const { index, seekTime } = resolveRestoreTarget(demoTracks, options?.restore);
         const targetTrack = demoTracks[index];
 
+        playlistSortModeRef.current = null;
+        setPlaylistSortMode(null);
         playlistRef.current = demoTracks;
         currentIndexRef.current = index;
         setPendingFolderRestore(null);
@@ -2693,6 +2793,8 @@ export default function App() {
         const { index, seekTime } = resolveRestoreTarget(parsedTracks, options?.restore);
         const targetTrack = parsedTracks[index];
 
+        playlistSortModeRef.current = null;
+        setPlaylistSortMode(null);
         playlistRef.current = parsedTracks;
         currentIndexRef.current = index;
         setPendingFolderRestore(null);
@@ -2889,6 +2991,8 @@ export default function App() {
         const targetTrack = cached[index];
 
         pendingSeekRef.current = null;
+        playlistSortModeRef.current = null;
+        setPlaylistSortMode(null);
         playlistRef.current = cached;
         currentIndexRef.current = index;
         setPendingFolderRestore(null);
@@ -3052,6 +3156,8 @@ export default function App() {
         const { index, seekTime } = resolveRestoreTarget(tracks, options?.restore);
         const targetTrack = tracks[index];
 
+        playlistSortModeRef.current = null;
+        setPlaylistSortMode(null);
         playlistRef.current = tracks;
         currentIndexRef.current = index;
         setPendingFolderRestore(null);
@@ -3270,6 +3376,8 @@ export default function App() {
       });
     }
 
+    playlistSortModeRef.current = null;
+    setPlaylistSortMode(null);
     playlistRef.current = [radioTrack];
     currentIndexRef.current = 0;
     setPendingFolderRestore(null);
@@ -7419,21 +7527,32 @@ export default function App() {
             data-no-zen-toggle="true"
             className="hidden md:flex landscape:flex md:col-span-6 lg:col-span-5 landscape:col-span-6 lg:landscape:col-span-5 flex-col glass rounded-3xl p-4 sm:p-5 h-[360px] lg:h-[400px] xl:h-[450px] max-h-[58vh] [@media(max-height:540px)_and_(orientation:landscape)]:h-[205px] [@media(max-height:540px)_and_(orientation:landscape)]:p-3 border border-white/10 cursor-default"
           >
-            <div className="flex items-center justify-between gap-3 pb-2.5 sm:pb-3 border-b border-white/10 mb-2.5 sm:mb-3">
-              <div className="flex items-center gap-2 shrink-0">
-                <ListMusic className="w-4 h-4 text-purple-400" />
-                <h3 className="font-semibold text-sm text-white">
-                  {t.playlistTitle} (<span className="font-mono tabular-nums">{playlist.length}</span>)
-                </h3>
+            <div className="flex flex-col gap-2 pb-2.5 sm:pb-3 border-b border-white/10 mb-2.5 sm:mb-3 [@media(max-height:540px)_and_(orientation:landscape)]:pb-1.5 [@media(max-height:540px)_and_(orientation:landscape)]:mb-1.5 [@media(max-height:540px)_and_(orientation:landscape)]:gap-1">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 shrink-0">
+                  <ListMusic className="w-4 h-4 text-purple-400" />
+                  <h3 className="font-semibold text-sm text-white">
+                    {t.playlistTitle} (<span className="font-mono tabular-nums">{playlist.length}</span>)
+                  </h3>
+                </div>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t.searchPlaceholder}
+                  aria-label={t.searchAriaLabel}
+                  className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-200 placeholder:text-gray-500 focus:outline-none focus:border-purple-500 w-32 sm:w-44"
+                />
               </div>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t.searchPlaceholder}
-                aria-label={t.searchAriaLabel}
-                className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-200 placeholder:text-gray-500 focus:outline-none focus:border-purple-500 w-32 sm:w-44"
-              />
+              {canSortPlaylist && (
+                <div className="flex items-center justify-end">
+                  <PlaylistSortControls
+                    sortMode={playlistSortMode}
+                    onToggleSort={handleTogglePlaylistSort}
+                    showDateAndPopular={hasSortableStats}
+                  />
+                </div>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-2 pr-1 hide-scrollbar">
@@ -7916,6 +8035,10 @@ export default function App() {
         isLoading={isLoadingTracks}
         isOffline={!isOnline}
         errorMessage={loadError}
+        canSort={canSortPlaylist}
+        showDateAndPopularSort={hasSortableStats}
+        sortMode={playlistSortMode}
+        onToggleSort={handleTogglePlaylistSort}
         onSelectTrack={(idx) => void selectTrack(idx, true)}
         onTriggerDemo={() => void handleTriggerDemo()}
         onOpenFolderSource={() => openSources('folder')}
