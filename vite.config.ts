@@ -24,10 +24,10 @@ export default defineConfig(() => {
         ],
         manifest: {
           id: '/',
-          name: 'YRitmX — Reactive Audio Visualizer & Player',
+          name: 'YRitmX — Универсальный реактивный медиаплеер и визуализатор',
           short_name: 'YRitmX',
           description:
-            'Реактивный аудиовизуализатор и плеер с поддержкой Audius, локальных MP3 и эквалайзера.',
+            'YRitmX — реактивный универсальный плеер для фото, видео, аудио и радио с магическим визуализатором, поддержкой Audius и записью видеоклипов в MP4.',
           start_url: '/',
           scope: '/',
           display: 'fullscreen',

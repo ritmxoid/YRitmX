@@ -1,6 +1,6 @@
 {
   "name": "YRitmX",
-  "description": "YRitmX — Reactive Audio Visualizer & Player with Audius streaming, local MP3 ID3 tag support, 5-band equalizer, and 8 real-time visualization modes.",
+  "description": "YRitmX — реактивный универсальный плеер для фото, видео, аудио и радио с магическим визуализатором, поддержкой Audius и записью видеоклипов в MP4.",
   "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
