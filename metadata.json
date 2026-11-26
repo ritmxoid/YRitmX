@@ -1,6 +1,6 @@
 {
   "name": "YRitmX",
-  "description": "YRitmX — реактивный универсальный плеер для фото, видео, аудио и радио с магическим визуализатором, поддержкой Audius и записью видеоклипов в MP4.",
+  "description": "YRitmX is a universal reactive player for photos, videos, audio, and radio with a magic visualizer, Audius streaming, and MP4 video clip recording.",
   "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
