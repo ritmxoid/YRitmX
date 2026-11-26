@@ -122,6 +122,7 @@ import {
   getDefaultAudiusProfilesForBrowser,
   INTERNATIONAL_AUDIUS_HANDLE,
 } from './utils/audiusApi';
+import { fetchRadioNowPlaying } from './utils/radioMetadata';
 import { createDemoTracks } from './utils/demoAudioGenerator';
 import {
   deleteDirectoryHandle,
@@ -157,7 +158,7 @@ const STORAGE_PROFILES_KEY = 'yritmx_profiles';
 const STORAGE_HANDLE_KEY = 'yritmx_current_handle';
 const STORAGE_FOLDERS_KEY = 'yritmx_saved_folders';
 const STORAGE_URLS_KEY = 'yritmx_saved_urls';
-const STORAGE_DEFAULT_FM_SEEDED_KEY = 'yritmx_default_fm_v2';
+const STORAGE_DEFAULT_FM_SEEDED_KEY = 'yritmx_default_fm_v3';
 const STORAGE_CAPTIONS_KEY = 'yritmx_orb_captions';
 const STORAGE_ORBS_KEY = 'yritmx_show_orbs';
 const STORAGE_INSTALL_PROMO_KEY = 'yritmx_install_promo_seen';
@@ -662,7 +663,11 @@ export default function App() {
 
     if (shouldSeedOrMigrate) {
       const now = Date.now();
-      const customEntries = existing.filter((entry) => !findDefaultFmStationByUrl(entry.url));
+      const customEntries = existing.filter(
+        (entry) =>
+          !findDefaultFmStationByUrl(entry.url) &&
+          !/^https?:\/\/abs\.zaycev\.fm\/rus256k\/?$/i.test(entry.url.trim())
+      );
       const seededDefaultEntries: SavedUrlEntry[] = langStations.map((station, idx) => ({
         id: `url-${hashString(station.url)}`,
         url: station.url,
@@ -1484,25 +1489,20 @@ export default function App() {
 
     let cancelled = false;
     let activeAbort: AbortController | null = null;
+    let consecutiveNulls = 0;
+    let quickRetryTimer = 0;
 
-    const fetchNowPlaying = async () => {
+    const fetchNowPlaying = async (isInitialAttempt = false) => {
       activeAbort?.abort();
       const ctrl = new AbortController();
       activeAbort = ctrl;
       try {
-        const res = await fetch(
-          `/api/radio-metadata?url=${encodeURIComponent(targetUrl)}`,
-          { signal: ctrl.signal, cache: 'no-store' }
-        );
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as {
-          title?: string | null;
-          artist?: string | null;
-        };
+        const data = await fetchRadioNowPlaying(targetUrl, ctrl.signal);
         if (cancelled) return;
         const nextTitle = typeof data.title === 'string' ? data.title.trim() : '';
         const nextArtist = typeof data.artist === 'string' ? data.artist.trim() : '';
         if (nextTitle) {
+          consecutiveNulls = 0;
           setRadioNowPlaying((prev) => {
             if (prev && prev.title === nextTitle && prev.artist === nextArtist) {
               return prev;
@@ -1510,21 +1510,35 @@ export default function App() {
             return { title: nextTitle, artist: nextArtist };
           });
         } else {
-          setRadioNowPlaying(null);
+          if (data.reachable) {
+            consecutiveNulls += 1;
+            if (consecutiveNulls >= 3) {
+              setRadioNowPlaying(null);
+            }
+          }
+          if (isInitialAttempt && !quickRetryTimer) {
+            quickRetryTimer = window.setTimeout(() => {
+              quickRetryTimer = 0;
+              if (!cancelled) {
+                void fetchNowPlaying(false);
+              }
+            }, 3500);
+          }
         }
       } catch {
         // Ignore transient or aborted metadata polls
       }
     };
 
-    void fetchNowPlaying();
+    void fetchNowPlaying(true);
     const pollId = window.setInterval(() => {
-      void fetchNowPlaying();
+      void fetchNowPlaying(false);
     }, 12000);
 
     return () => {
       cancelled = true;
       activeAbort?.abort();
+      window.clearTimeout(quickRetryTimer);
       window.clearInterval(pollId);
     };
   }, [currentTrack?.isRadio, currentTrack?.src, isOnline, isPlaying, radioMetaRefreshTick]);

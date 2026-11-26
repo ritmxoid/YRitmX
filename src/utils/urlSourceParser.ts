@@ -11,7 +11,7 @@ const NON_STREAM_DOC_EXT_RE =
 const RADIO_STREAM_PATH_RE =
   /(?:[-_](?:32|48|56|64|80|96|112|128|160|192|224|256|320)[-_](?:mp3|aac|aacp|ogg|opus|flac|m4a)|(?:mp3|aac|aacp|ogg|opus|flac)[-_](?:32|48|56|64|80|96|112|128|160|192|224|256|320)|\/(?:stream|listen|radio|live|mp3|aac|aacp|ogg|opus|flac)(?:\/\d*)?|\/;[^/?#]*)$/i;
 const RADIO_HOST_RE =
-  /(^|\.)(somafm\.com|musicradio\.com|streamguys\d*\.com|181fm\.com|hostingradio\.ru|streamtheworld\.com|radiorecord\.ru|zaycev\.fm|rmfstream\.pl|smcdn\.pl|swr\.de|rfm\.fr|unitedradio\.it|bauermedia\.pt|powerapp\.com\.tr|torontocast\.com|vibesounds\.in|zhanafm\.kz|radioca\.st|zeno\.fm|radiojar\.com|radioking\.com|myradio24\.|uber\.radio|icecast|shoutcast|radiostream)/i;
+  /(^|\.)(somafm\.com|musicradio\.com|streamguys\d*\.com|181fm\.com|hostingradio\.ru|cdnvideo\.ru|streamtheworld\.com|radiorecord\.ru|zaycev\.fm|rmfstream\.pl|smcdn\.pl|swr\.de|rfm\.fr|unitedradio\.it|bauermedia\.pt|powerapp\.com\.tr|torontocast\.com|vibesounds\.in|zhanafm\.kz|radioca\.st|zeno\.fm|radiojar\.com|radioking\.com|myradio24\.|uber\.radio|icecast|shoutcast|radiostream)/i;
 
 function isLikelyDirectAudioStreamUrl(parsedUrl: URL): boolean {
   if (NON_STREAM_DOC_EXT_RE.test(parsedUrl.pathname)) return false;

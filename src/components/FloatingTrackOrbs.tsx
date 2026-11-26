@@ -1210,6 +1210,7 @@ export function FloatingTrackOrbs({
                   letterSpacing="0.4px"
                 >
                   <textPath
+                    key={fittedCaption}
                     href={`#${pathId}`}
                     startOffset="50%"
                     textAnchor="middle"

@@ -13,7 +13,8 @@ const CHROME_UA =
 const MAX_REDIRECTS = 5;
 const MAX_PLAYLIST_BYTES = 2 * 1024 * 1024;
 const RADIO_META_CACHE_TTL_MS = 8000;
-const RADIO_META_MAX_BYTES = 160 * 1024;
+const RADIO_META_EMPTY_CACHE_TTL_MS = 2000;
+const RADIO_META_MAX_BYTES = 256 * 1024;
 
 interface CachedRadioMeta {
   expiresAt: number;
@@ -378,9 +379,10 @@ async function startServer() {
         const firstKey = radioMetaCache.keys().next().value;
         if (firstKey) radioMetaCache.delete(firstKey);
       }
+      const ttl = entry.title ? RADIO_META_CACHE_TTL_MS : RADIO_META_EMPTY_CACHE_TTL_MS;
       radioMetaCache.set(rawUrl, {
         ...entry,
-        expiresAt: Date.now() + RADIO_META_CACHE_TTL_MS,
+        expiresAt: Date.now() + ttl,
       });
     };
 
@@ -446,21 +448,53 @@ async function startServer() {
         return;
       }
 
-      // Case 2: Standard ICY stream without icy-metaint header
+      // Case 2: Standard ICY stream without icy-metaint header (check provider JSON fallbacks like Zaycev/SomaFM)
       if (!Number.isFinite(metaint) || metaint <= 0 || metaint > 262144) {
         void upstream.body.cancel().catch(() => {});
-        writeCache({ title: null, artist: null, stationName });
+        let fallbackTitle: string | null = null;
+        let fallbackArtist: string | null = null;
+        let fallbackStation = stationName;
+        try {
+          const parsedUrl = new URL(rawUrl);
+          if (/(^|\.)zaycev\.fm$/i.test(parsedUrl.hostname)) {
+            const seg = parsedUrl.pathname.split('/').filter(Boolean)[0] || '';
+            const channel = seg.replace(/(?:48|64|96|128|192|256|320)k$/i, '').toLowerCase();
+            if (channel && /^[a-z0-9_-]+$/i.test(channel)) {
+              const zRes = await fetch(
+                `https://zaycev.fm/api/v1/recent?channel=${encodeURIComponent(channel)}&limit=1`,
+                { signal: controller.signal }
+              );
+              if (zRes.ok) {
+                const zJson = (await zRes.json()) as Array<{
+                  track?: { title?: unknown; artist?: unknown };
+                }>;
+                const first = Array.isArray(zJson) ? zJson[0] : undefined;
+                if (typeof first?.track?.title === 'string' && first.track.title.trim()) {
+                  fallbackTitle = cleanRadioTextFragment(first.track.title).slice(0, 140);
+                  fallbackArtist =
+                    typeof first.track.artist === 'string' && first.track.artist.trim()
+                      ? cleanRadioTextFragment(first.track.artist).slice(0, 100)
+                      : fallbackStation || 'Zaycev.FM';
+                  fallbackStation = fallbackStation || 'Zaycev.FM';
+                }
+              }
+            }
+          }
+        } catch {
+          // ignore provider JSON fallback errors
+        }
+        writeCache({ title: fallbackTitle, artist: fallbackArtist, stationName: fallbackStation });
         res.setHeader('Cache-Control', 'no-store');
-        res.json({ title: null, artist: null, stationName });
+        res.json({ title: fallbackTitle, artist: fallbackArtist, stationName: fallbackStation });
         return;
       }
 
-      // Case 3: Read ICY audio+metadata frame (up to 2 blocks when interval is small)
+      // Case 3: Read ICY audio+metadata frame (scan up to 4 blocks when interval is <= 32KB)
       const reader = upstream.body.getReader();
       let buffer: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
       let totalRead = 0;
       let blocksChecked = 0;
-      const maxBlocks = metaint <= 32768 ? 2 : 1;
+      const maxBlocks = metaint <= 32768 ? 4 : metaint <= 65536 ? 2 : 1;
       let parsedTitle: string | null = null;
       let parsedArtist: string | null = null;
 
@@ -506,6 +540,36 @@ async function startServer() {
         }
       } finally {
         void reader.cancel().catch(() => {});
+      }
+
+      if (!parsedTitle) {
+        try {
+          const parsedUrl = new URL(rawUrl);
+          if (/(^|\.)somafm\.com$/i.test(parsedUrl.hostname)) {
+            const seg = parsedUrl.pathname.split('/').filter(Boolean)[0] || '';
+            const channel = seg.split('-')[0]?.trim().toLowerCase();
+            if (channel && /^[a-z0-9]+$/i.test(channel)) {
+              const somaRes = await fetch(`https://somafm.com/songs/${channel}.json`, {
+                signal: controller.signal,
+              });
+              if (somaRes.ok) {
+                const somaJson = (await somaRes.json()) as {
+                  songs?: Array<{ title?: unknown; artist?: unknown }>;
+                };
+                const first = Array.isArray(somaJson?.songs) ? somaJson.songs[0] : undefined;
+                if (typeof first?.title === 'string' && first.title.trim()) {
+                  parsedTitle = cleanRadioTextFragment(first.title).slice(0, 140);
+                  parsedArtist =
+                    typeof first?.artist === 'string' && first.artist.trim()
+                      ? cleanRadioTextFragment(first.artist).slice(0, 100)
+                      : stationName;
+                }
+              }
+            }
+          }
+        } catch {
+          // ignore SomaFM fallback errors
+        }
       }
 
       writeCache({ title: parsedTitle, artist: parsedArtist, stationName });
